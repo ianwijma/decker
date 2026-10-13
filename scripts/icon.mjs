@@ -1,0 +1,2 @@
+import sharp from 'sharp'
+await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect width="256" height="256" rx="60" fill="#5865f2"/><g fill="white"><rect x="50" y="50" width="64" height="64" rx="14"/><rect x="142" y="50" width="64" height="64" rx="14"/><rect x="50" y="142" width="64" height="64" rx="14"/><rect x="142" y="142" width="64" height="64" rx="14"/></g></svg>')).png().toFile('resources/icon.png')

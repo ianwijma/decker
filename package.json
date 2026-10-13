@@ -1,0 +1,75 @@
+{
+  "name": "decker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Linux Stream Deck studio with local workflows",
+  "author": "Decker contributors",
+  "main": "out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test && npm run build",
+    "package": "npm run build && electron-builder --linux deb AppImage --publish never",
+    "package:dir": "npm run build && electron-builder --linux dir --publish never",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@elgato-stream-deck/node": "^7.3.1",
+    "@xyflow/react": "^12.9.3",
+    "execa": "^9.6.0",
+    "lucide-react": "^0.468.0",
+    "obs-websocket-js": "^5.0.6",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "sharp": "^0.34.3",
+    "xstate": "^5.20.2",
+    "zod": "^4.1.0",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@tailwindcss/vite": "^4.1.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^4.0.0",
+    "prettier": "^3.9.10",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0",
+    "vitest": "^3.2.4"
+  },
+  "build": {
+    "appId": "dev.decker.app",
+    "productName": "Decker",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/*.node",
+      "**/sharp/**",
+      "**/@img/**",
+      "**/node-hid/**"
+    ],
+    "linux": {
+      "target": [
+        "deb",
+        "AppImage"
+      ],
+      "category": "Utility",
+      "maintainer": "Decker contributors",
+      "icon": "resources/icon.png"
+    },
+    "npmRebuild": false
+  }
+}
