@@ -259,7 +259,10 @@ function startWorker(name: "runner" | "device", failures = 0) {
         return;
       }
       if (name === "device") {
-        if (message.type === "devices") {
+        if (message.type === "nativeReady") {
+          observed.hardwareNativeReady = true;
+          publish();
+        } else if (message.type === "devices") {
           devices = message.devices;
           publish();
         } else if (message.type === "key") {

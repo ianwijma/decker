@@ -104,6 +104,7 @@ async function scan() {
   scanning = true;
   try {
     const found = await listStreamDecks();
+    send({ type: "nativeReady" });
     for (const [id, c] of connections)
       if (!found.some((d) => d.path === c.path)) await disconnect(id);
     for (const info of found) {

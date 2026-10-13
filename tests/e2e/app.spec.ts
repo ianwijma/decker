@@ -41,6 +41,14 @@ test("edits a key, executes a flow with the editor hidden, and persists accent a
       ),
     )
     .toBe(true);
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        async () =>
+          (await window.decker.snapshot()).observed.hardwareNativeReady,
+      ),
+    )
+    .toBe(true);
   await page.getByRole("button", { name: "Key 4", exact: true }).click();
   await page.getByRole("button", { name: "Copy text", exact: true }).click();
   await page
