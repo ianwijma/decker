@@ -1,0 +1,48 @@
+name: CI
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Test and package Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install Linux runtime dependencies
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0 libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libxss1 xvfb xauth
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Electron interaction tests
+        run: xvfb-run --auto-servernum npm run test:e2e
+      - name: Build Debian and AppImage packages
+        run: npm run package
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Packaged Electron and native module smoke tests
+        run: xvfb-run --auto-servernum npm run test:e2e
+        env:
+          DECKER_EXECUTABLE: release/linux-unpacked/decker
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-test-results
+          path: |
+            test-results/
+            playwright-report/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: decker-linux-x64
+          path: |
+            release/*.deb
+            release/*.AppImage
