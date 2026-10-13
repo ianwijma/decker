@@ -184,3 +184,19 @@ it('exports configuration without inline HTTP authentication or connection crede
   expect(exported).not.toContain('token=private')
   expect(exported).not.toContain('credentialRef')
 })
+
+it('recovers damaged history without losing valid configuration and backs up malformed configuration JSON', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'decker-recovery-'))
+  try {
+    const storage = new Storage(directory),
+      config = defaultConfig()
+    config.settings.accent = '#eb459e'
+    await storage.save(config, [])
+    await writeFile(join(directory, 'runs.json'), '{broken')
+    expect((await storage.load()).config.settings.accent).toBe('#eb459e')
+    await writeFile(join(directory, 'config.json'), '{broken')
+    await expect(storage.load()).rejects.toThrow('backup')
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})

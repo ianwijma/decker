@@ -77,7 +77,7 @@ test('visual workflow execution continues with the editor hidden and cancellatio
     await window.decker.save(state.config)
     return window.decker.run(flow.id)
   })
-  await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide())
+  await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close())
   await expect
     .poll(() =>
       page.evaluate(
@@ -135,4 +135,72 @@ test('deck software down/up captures bindings and folders navigate', async () =>
     page.getByRole('button', { name: 'Key 1: Focus session', exact: true })
   ).toBeVisible()
   await page.screenshot({ path: 'test-results/deck.png', fullPage: true })
+})
+
+test('runner crash interrupts the run and supervision accepts the next execution', async () => {
+  const id = await page.evaluate(async () => {
+    const state = await window.decker.state()
+    state.config.workflows[0].nodes[2].config.ms = 10000
+    await window.decker.save(state.config)
+    return window.decker.run(state.config.workflows[0].id)
+  })
+  await desktop.evaluate(({ app }) => {
+    const runner = app.getAppMetrics().find((m) => m.name === 'Decker workflows')
+    if (!runner) throw new Error('Runner process missing')
+    process.kill(runner.pid, 'SIGKILL')
+  })
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async (id) => (await window.decker.state()).runs.find((r) => r.id === id)?.status,
+        id
+      )
+    )
+    .toBe('interrupted')
+  await expect
+    .poll(() =>
+      desktop.evaluate(({ app }) => app.getAppMetrics().some((m) => m.name === 'Decker workflows'))
+    )
+    .toBe(true)
+  await page.getByRole('button', { name: 'Key 3: Copy greeting', exact: true }).dblclick()
+  await expect
+    .poll(() => desktop.evaluate(({ clipboard }) => clipboard.readText()))
+    .toBe('Hello from Decker')
+})
+
+test('hash-addressed key images render and round trip with configuration exports', async () => {
+  const data = await page.evaluate(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 32
+    canvas.height = 32
+    const ctx = canvas.getContext('2d')!
+    ctx.fillStyle = '#00a8fc'
+    ctx.fillRect(0, 0, 32, 32)
+    return canvas.toDataURL('image/png').split(',')[1]
+  })
+  const hash = await page.evaluate(async (data) => {
+    const hash = await window.decker.image(data),
+      state = await window.decker.state()
+    state.config.profiles[0].pages[0].keys['0'].appearance.asset = hash
+    await window.decker.save(state.config)
+    return hash
+  }, data)
+  await expect
+    .poll(() =>
+      page
+        .locator(`img[src="decker-asset://${hash}"]`)
+        .evaluate((img: HTMLImageElement) => img.naturalWidth)
+    )
+    .toBe(256)
+  const result = await page.evaluate(async () => {
+    const text = await window.decker.export()
+    const parsed = JSON.parse(text)
+    const imported = await window.decker.import(text)
+    return {
+      assets: Object.keys(parsed.bundledAssets),
+      asset: imported.profiles[0].pages[0].keys['0'].appearance.asset
+    }
+  })
+  expect(result.assets).toContain(hash)
+  expect(result.asset).toBe(hash)
 })

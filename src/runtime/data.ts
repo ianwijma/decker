@@ -104,7 +104,10 @@ export function abortError(signal: AbortSignal): void {
   if (signal.aborted) throw signal.reason ?? new Error('Cancelled')
 }
 export function abortable<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
-  abortError(signal)
+  if (signal.aborted) {
+    void operation.catch(() => {})
+    return Promise.reject(signal.reason ?? new Error('Cancelled'))
+  }
   return new Promise<T>((resolve, reject) => {
     let cleanup: ReturnType<typeof setTimeout> | undefined
     const finish = () => {

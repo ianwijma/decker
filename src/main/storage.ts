@@ -14,7 +14,19 @@ export class Storage {
   }
   async load(): Promise<{ config: Config; runs: RunRecord[] }> {
     await mkdir(this.directory, { recursive: true })
-    const document = await this.read('config.json')
+    let document: unknown
+    try {
+      document = await this.read('config.json')
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        await copyFile(
+          join(this.directory, 'config.json'),
+          join(this.directory, `config-invalid-${Date.now()}.json`)
+        )
+        throw new Error('Configuration JSON is invalid. A backup was saved before recovery.')
+      }
+      throw error
+    }
     let config = defaultConfig()
     if (document) {
       const parsed = configSchema.safeParse(document)
@@ -29,7 +41,18 @@ export class Storage {
       }
       config = parsed.data
     }
-    const history = await this.read('runs.json')
+    let history: unknown
+    try {
+      history = await this.read('runs.json')
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error
+      await copyFile(
+        join(this.directory, 'runs.json'),
+        join(this.directory, `runs-invalid-${Date.now()}.json`)
+      )
+      // A broken history file must never discard the valid deck configuration.
+      history = []
+    }
     const runs = Array.isArray(history)
       ? history
           .filter((r) => r && typeof r.id === 'string' && Array.isArray(r.nodes))
