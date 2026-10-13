@@ -305,7 +305,22 @@ export const catalog: ActionDefinition[] = definitions.map((d) => ({
             ? z.boolean()
             : field.options
               ? z.enum(field.options as [string, ...string[]])
-              : z.string(),
+              : field.key === "args"
+                ? z.string().refine((value) => {
+                    try {
+                      const args = JSON.parse(value);
+                      return (
+                        Array.isArray(args) &&
+                        args.length <= 256 &&
+                        args.every((a) => typeof a === "string")
+                      );
+                    } catch {
+                      return false;
+                    }
+                  }, "Use a JSON array of at most 256 string arguments")
+                : ["executable", "url", "target", "keys"].includes(field.key)
+                  ? z.string().min(1)
+                  : z.string(),
       ]),
     ),
   ),

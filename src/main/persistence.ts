@@ -16,6 +16,7 @@ import {
   type RunRecord,
 } from "../shared/schema";
 import { defaults } from "../shared/defaults";
+import { actionById } from "../shared/catalog";
 import { validateWorkflow } from "../runtime/validate";
 export function validateDocument(value: unknown): AppDocument {
   const doc = documentSchema.parse(value),
@@ -56,6 +57,31 @@ export function validateDocument(value: unknown): AppDocument {
 }
 export function validateImport(value: unknown): AppDocument {
   const doc = validateDocument(value);
+  for (const profile of doc.profiles)
+    for (const page of profile.pages)
+      for (const binding of Object.values(page.keys))
+        for (const target of [
+          binding.press,
+          binding.release,
+          binding.longPress,
+        ]) {
+          if (!target) continue;
+          if (target.kind === "workflow") {
+            if (!doc.workflows.some((f) => f.id === target.workflowId))
+              throw new Error(
+                `Missing assigned workflow: ${target.workflowId}`,
+              );
+            continue;
+          }
+          for (const action of target.kind === "action"
+            ? [target.action]
+            : target.actions) {
+            const definition = actionById(action.type);
+            if (!definition || definition.version !== action.version)
+              throw new Error(`Unknown imported action: ${action.type}`);
+            definition.schema.parse(action.config);
+          }
+        }
   for (const f of doc.workflows) {
     const errors = validateWorkflow(f, doc.workflows);
     if (errors.length) throw new Error(errors.join("\n"));

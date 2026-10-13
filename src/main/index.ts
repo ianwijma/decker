@@ -314,7 +314,26 @@ function startWorker(name: "runner" | "device", failures = 0) {
         publish();
         persist();
       } else if (message.type === "capabilities") {
-        capabilities = message.capabilities;
+        capabilities = (message.capabilities as Snapshot["capabilities"]).map(
+          (c) =>
+            c.id === "obs"
+              ? {
+                  ...c,
+                  available: document.connections.some((connection) =>
+                    Boolean(
+                      (
+                        observed[`obs:${connection.id}`] as {
+                          connected?: boolean;
+                        }
+                      )?.connected,
+                    ),
+                  ),
+                  detail: document.connections.length
+                    ? "OBS connection status is shown below."
+                    : c.detail,
+                }
+              : c,
+        );
         publish();
       } else if (message.type === "observed") {
         observed[message.id] = redact(

@@ -2,7 +2,11 @@ import { it, expect, afterEach } from "vitest";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Persistence, validateDocument } from "../src/main/persistence";
+import {
+  Persistence,
+  validateDocument,
+  validateImport,
+} from "../src/main/persistence";
 import { defaults } from "../src/shared/defaults";
 const directories: string[] = [];
 afterEach(async () => {
@@ -82,4 +86,16 @@ it("rejects image tampering and path traversal on import", async () => {
   await expect(
     s.importAssets({ ["a".repeat(64)]: "aW1hZ2U=" }),
   ).rejects.toThrow("checksum");
+});
+
+it("rejects unknown direct actions and missing workflow assignments on import", () => {
+  const doc = defaults(),
+    binding = doc.profiles[0].pages[0].keys[0];
+  binding.press = {
+    kind: "action",
+    action: { type: "unknown", version: 1, config: {} },
+  };
+  expect(() => validateImport(doc)).toThrow("Unknown imported action");
+  binding.press = { kind: "workflow", workflowId: "missing" };
+  expect(() => validateImport(doc)).toThrow("Missing assigned workflow");
 });
