@@ -44,7 +44,29 @@ export function execute(
     startedAt: Date.now(),
     nodes: []
   }
-  const emit = () => onUpdate(structuredClone(record))
+  let traceBudget = 512 * 1024
+  const traceData = (value: unknown): Json => {
+    if (traceBudget <= 0) return '[run trace budget reached]'
+    const output = redact(value, Math.min(12000, traceBudget))
+    traceBudget -= JSON.stringify(output).length
+    return output
+  }
+  let updateTimer: ReturnType<typeof setTimeout> | undefined
+  let lastUpdate = 0
+  const emit = () => {
+    if (record.status !== 'running' || !lastUpdate || Date.now() - lastUpdate >= 25) {
+      clearTimeout(updateTimer)
+      updateTimer = undefined
+      lastUpdate = Date.now()
+      onUpdate(structuredClone(record))
+    } else {
+      updateTimer ??= setTimeout(() => {
+        updateTimer = undefined
+        lastUpdate = Date.now()
+        onUpdate(structuredClone(record))
+      }, 25)
+    }
+  }
   const timer = setTimeout(() => controller.abort(new Error('Run timeout')), flow.timeoutMs)
   const childFlow = async (
     id: string,
@@ -86,7 +108,7 @@ export function execute(
         path: `${path}/${n.id}`,
         status: 'running',
         startedAt: Date.now(),
-        input: redact(scope)
+        input: traceData(scope)
       }
       if (record.nodes.length >= 1000) throw new Error('Run trace limit reached (1000 nodes)')
       record.nodes.push(trace)
@@ -110,7 +132,7 @@ export function execute(
                   ...n.action!,
                   config: resolve(n.action!.config, scope) as Action['config']
                 }
-                trace.input = redact(a.config)
+                trace.input = traceData(a.config)
                 last = await abortable(
                   handler(a, nodeSignal, {
                     runId: record.id,
@@ -263,7 +285,7 @@ export function execute(
           }
         scope.nodes[n.id] = last
         trace.status = 'success'
-        trace.output = redact(last)
+        trace.output = traceData(last)
       } catch (e) {
         trace.status = signal.aborted ? 'cancelled' : 'error'
         trace.error = String(redact(String(e)))

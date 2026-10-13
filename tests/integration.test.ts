@@ -200,3 +200,43 @@ it('recovers damaged history without losing valid configuration and backs up mal
     await rm(directory, { recursive: true, force: true })
   }
 })
+
+it('coalesces rapid run updates and caps retained trace data', async () => {
+  const flow = workflowSchema.parse({
+    id: 'traces',
+    name: 'traces',
+    revision: 1,
+    nodes: [
+      { id: 'start', label: 'start', kind: 'trigger', position: { x: 0, y: 0 } },
+      {
+        id: 'repeat',
+        label: 'repeat',
+        kind: 'repeat',
+        config: { count: 100, maxIterations: 100, concurrency: 1 },
+        position: { x: 0, y: 0 }
+      },
+      {
+        id: 'body',
+        label: 'body',
+        kind: 'action',
+        action: { type: 'clipboard', config: { text: 'x' } },
+        position: { x: 0, y: 0 }
+      }
+    ],
+    edges: [
+      { id: 'first', source: 'start', target: 'repeat' },
+      { id: 'body', source: 'repeat', target: 'body', port: 'body' }
+    ]
+  })
+  let updates = 0
+  const run = await execute(
+    flow,
+    [flow],
+    async () => ({ text: 'x'.repeat(16000) }),
+    {},
+    () => updates++
+  ).done
+  expect(run.status).toBe('success')
+  expect(updates).toBeLessThan(20)
+  expect(JSON.stringify(run.nodes).length).toBeLessThan(600000)
+})

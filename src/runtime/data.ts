@@ -72,8 +72,8 @@ export function resolve(value: Json, scope: Scope): Json {
   }
   return value
 }
-export function redact(value: unknown): Json {
-  let budget = 12000
+export function redact(value: unknown, limit = 12000): Json {
+  let budget = limit
   const walk = (v: unknown, depth: number): Json => {
     if (budget <= 0 || depth > 8) return '[truncated]'
     if (typeof v === 'string') {
