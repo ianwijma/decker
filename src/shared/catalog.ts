@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ActionInstance } from "./schema";
 import { desktopPathSchema, desktopUrlSchema } from "./desktop-target";
+import { mediaActions } from "./media";
 export type Field = {
   key: string;
   label: string;
@@ -187,6 +188,7 @@ const definitions: Omit<
   },
   {
     id: "media.control",
+    paletteVisible: false,
     name: "Media control",
     group: "Desktop",
     icon: "▶",
@@ -206,6 +208,17 @@ const definitions: Omit<
     resource: "media",
     idempotent: false,
   },
+  ...mediaActions.map((action) => ({
+    id: action.id,
+    name: action.name,
+    group: "Media",
+    icon: action.icon,
+    description: `${action.name} on the selected MPRIS player. Blank player selects the first sorted bus name.`,
+    capabilities: ["media"],
+    fields: [f("player", "Player bus name (blank: first)", "")],
+    resource: "media",
+    idempotent: false,
+  })),
   {
     id: "audio.control",
     name: "Audio / microphone",

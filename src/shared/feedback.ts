@@ -1,4 +1,10 @@
 import type { Json, KeyBinding } from "./schema";
+import {
+  mediaAction,
+  mediaActions,
+  mediaPlayback,
+  mediaPlaybackIcons,
+} from "./media";
 /** Display the integration's observed state, never a guessed local toggle count. */
 export function observedAppearance(
   binding: KeyBinding,
@@ -48,10 +54,21 @@ export function observedAppearance(
       if (muted) appearance.background = accent;
     }
   }
-  if (type === "media.control") {
+  if (mediaAction(type, config)) {
     const state = observed.media as Record<string, Json> | undefined;
-    const player = String(config.player || state?.defaultPlayer || "");
-    if (state?.[player] === "Playing") appearance.background = accent;
+    const playback = mediaPlayback(config, state);
+    if (playback === "Playing") appearance.background = accent;
+    // The catalog's neutral default opts into observed icons. Authored text,
+    // other pack icons and uploaded images retain precedence; labels stay authored.
+    const dynamic = mediaActions.find(
+      (action) => action.id === "media.playPause",
+    )!;
+    if (
+      type === dynamic.id &&
+      !appearance.asset &&
+      appearance.icon === dynamic.icon
+    )
+      appearance.icon = mediaPlaybackIcons[playback];
   }
   return appearance;
 }

@@ -16,6 +16,7 @@ import type {
   WorkflowDefinition,
 } from "../../shared/schema";
 import { actionLocation, FilePickerButton } from "./file-picker";
+import { MediaIcon } from "./MediaIcon";
 export function FieldLabel({
   label,
   children,
@@ -385,7 +386,7 @@ export function Catalog({ onPick }: { onPick: (type: string) => void }) {
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
-      {["Developer", "Desktop", "Streaming", "Deck"].map((group) => (
+      {["Developer", "Desktop", "Media", "Streaming", "Deck"].map((group) => (
         <div key={group} className="catalog-group">
           <h3>{group}</h3>
           {paletteCatalog
@@ -409,7 +410,7 @@ export function Catalog({ onPick }: { onPick: (type: string) => void }) {
                 title={a.description}
               >
                 <span className={`action-icon group-${group.toLowerCase()}`}>
-                  {a.icon}
+                  {group === "Media" ? <MediaIcon icon={a.icon} /> : a.icon}
                 </span>
                 <span>{a.name}</span>
                 <Plus size={13} />
