@@ -31,6 +31,8 @@ test.afterEach(async () => {
 });
 test("edits a key, executes a flow with the editor hidden, and persists accent and assignments", async () => {
   let page = await launch();
+  const welcomeId = (await page.evaluate(() => window.decker.snapshot()))
+    .document.workflows[0].id;
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await expect(page.getByRole("button", { name: /^Key \d/ })).toHaveCount(32);
@@ -84,10 +86,11 @@ test("edits a key, executes a flow with the editor hidden, and persists accent a
   await expect
     .poll(async () =>
       page.evaluate(
-        async () =>
+        async (id) =>
           (await window.decker.snapshot()).runs
-            .filter((r) => r.workflowId === "welcome")
+            .filter((r) => r.workflowId === id)
             .at(-1)?.status,
+        welcomeId,
       ),
     )
     .toBe("success");
@@ -116,7 +119,7 @@ test("edits a key, executes a flow with the editor hidden, and persists accent a
   });
   expect(
     config.runs.some(
-      (r) => r.workflowId === "welcome" && r.status === "success",
+      (r) => r.workflowId === welcomeId && r.status === "success",
     ),
   ).toBe(true);
 });

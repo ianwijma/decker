@@ -85,7 +85,7 @@ async function inject(
 }
 function definition(id: string, nodes: FlowNode[]): WorkflowDefinition {
   return {
-    id,
+    id: crypto.randomUUID(),
     name: id,
     revision: 1,
     inputs: [],
@@ -112,7 +112,7 @@ async function drag(
   id: string,
   dx: number,
   dy: number,
-  workflowId = "welcome",
+  workflowId?: string,
 ) {
   const element = page.locator(`.react-flow__node[data-id="${id}"]`);
   const selection = page.locator(".react-flow__nodesselection-rect");
@@ -153,11 +153,11 @@ async function drag(
     page.getByText("All changes saved", { exact: true }),
   ).toBeVisible();
 }
-async function layout(page: Page, workflowId = "welcome") {
+async function layout(page: Page, workflowId?: string) {
   return page.evaluate(
     async (id) =>
-      (await window.decker.snapshot()).document.workflows.find(
-        (f) => f.id === id,
+      (await window.decker.snapshot()).document.workflows.find((f, index) =>
+        id ? f.id === id : index === 0,
       )!.layout,
     workflowId,
   );

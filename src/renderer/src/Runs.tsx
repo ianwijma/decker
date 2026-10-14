@@ -1,3 +1,4 @@
+import { resolveWorkflowId } from "../../shared/workflow-identity";
 import { useState } from "react";
 import { CheckCircle2, Clock3, Search, Square, XCircle } from "lucide-react";
 import { useApp } from "./store";
@@ -13,7 +14,11 @@ export function Runs() {
       (r) =>
         (filter === "all" || r.status === filter) &&
         (deckFilter === "all" || r.deckId === deckFilter) &&
-        (workflowFilter === "all" || r.workflowId === workflowFilter) &&
+        (workflowFilter === "all" ||
+          resolveWorkflowId(
+            r.workflowId,
+            snapshot!.document.workflowAliases,
+          ) === workflowFilter) &&
         r.workflowName.toLowerCase().includes(query.toLowerCase()),
     ),
     run = all.find((r) => r.id === selected) ?? runs[0];
@@ -68,7 +73,13 @@ export function Runs() {
           <option value="all">All workflows</option>
           {[
             ...new Map(
-              all.map((r) => [r.workflowId, r.workflowName]),
+              all.map((r) => [
+                resolveWorkflowId(
+                  r.workflowId,
+                  snapshot!.document.workflowAliases,
+                ),
+                r.workflowName,
+              ]),
             ).entries(),
           ].map(([id, name]) => (
             <option value={id} key={id}>

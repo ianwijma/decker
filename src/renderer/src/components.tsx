@@ -1,3 +1,6 @@
+import { WorkflowDropdown } from "./WorkflowDropdown";
+import { useApp } from "./store";
+import { selectFlowWorkflows, selectWorkflowAliases } from "./flow-selectors";
 import { useEffect, useState, type ReactNode } from "react";
 import { Plus, Search } from "lucide-react";
 import {
@@ -87,6 +90,8 @@ export function ActionFields({
   bindings?: boolean;
   available?: string[];
 }) {
+  const workflows = useApp(selectFlowWorkflows),
+    aliases = useApp(selectWorkflowAliases);
   const definition = actionById(action.type);
   if (!definition)
     return <p className="danger-text">Unknown action: {action.type}</p>;
@@ -106,6 +111,13 @@ export function ActionFields({
                   label={`${field.label} binding`}
                   value={value}
                   onChange={(v) => change(field, v)}
+                />
+              ) : field.type === "workflow" ? (
+                <WorkflowDropdown
+                  workflows={workflows}
+                  aliases={aliases}
+                  value={String(value)}
+                  onSelect={(id) => change(field, id)}
                 />
               ) : field.type === "boolean" ? (
                 <input
@@ -185,6 +197,7 @@ export function TargetEditor({
   onChange: (target?: Target) => void;
   workflows: WorkflowDefinition[];
 }) {
+  const aliases = useApp(selectWorkflowAliases);
   const kind = target?.kind ?? "none";
   return (
     <div className="target-editor">
@@ -215,19 +228,12 @@ export function TargetEditor({
       </FieldLabel>
       {target?.kind === "workflow" && (
         <FieldLabel label="Workflow">
-          <select
-            aria-label="Workflow"
+          <WorkflowDropdown
+            workflows={workflows}
+            aliases={aliases}
             value={target.workflowId}
-            onChange={(e) =>
-              onChange({ ...target, workflowId: e.target.value })
-            }
-          >
-            {workflows.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name} · v{w.revision}
-              </option>
-            ))}
-          </select>
+            onSelect={(id) => onChange({ ...target, workflowId: id })}
+          />
         </FieldLabel>
       )}
       {target?.kind === "action" && (

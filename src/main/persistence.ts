@@ -1,3 +1,4 @@
+import { findWorkflow } from "../shared/workflow-identity";
 import {
   mkdir,
   readFile,
@@ -99,7 +100,13 @@ export function validateImport(value: unknown): AppDocument {
         ]) {
           if (!target) continue;
           if (target.kind === "workflow") {
-            if (!doc.workflows.some((f) => f.id === target.workflowId))
+            if (
+              !findWorkflow(
+                doc.workflows,
+                target.workflowId,
+                doc.workflowAliases,
+              )
+            )
               throw new Error(
                 `Missing assigned workflow: ${target.workflowId}`,
               );
@@ -111,17 +118,42 @@ export function validateImport(value: unknown): AppDocument {
             const definition = actionById(action.type);
             if (!definition || definition.version !== action.version)
               throw new Error(`Unknown imported action: ${action.type}`);
-            definition.schema.parse(action.config);
+            const fields = definition.fields;
+            const config = { ...action.config };
+            for (const field of fields) {
+              const value = config[field.key];
+              if (value && typeof value === "object") {
+                if (
+                  Array.isArray(value) ||
+                  typeof value.$ref !== "string" ||
+                  value.$ref
+                    .split(".")
+                    .some((part) =>
+                      ["__proto__", "prototype", "constructor"].includes(part),
+                    )
+                )
+                  throw new Error("Invalid action data reference");
+                config[field.key] = field.default ?? "";
+              }
+              if (
+                field.type === "workflow" &&
+                typeof value === "string" &&
+                !findWorkflow(doc.workflows, value, doc.workflowAliases)
+              )
+                throw new Error("Missing action workflow");
+            }
+            definition.schema.parse(config);
           }
         }
   for (const f of doc.workflows) {
-    const errors = validateWorkflow(f, doc.workflows);
+    const errors = validateWorkflow(f, doc.workflows, doc.workflowAliases);
     if (errors.length) throw new Error(errors.join("\n"));
   }
   return doc;
 }
 export class Persistence {
   private pending = Promise.resolve();
+  private loadFailure?: string;
   readonly assetDirectory: string;
   constructor(readonly directory: string) {
     this.assetDirectory = join(directory, "assets");
@@ -132,27 +164,31 @@ export class Persistence {
     warning?: string;
   }> {
     await mkdir(this.assetDirectory, { recursive: true });
+    this.loadFailure = undefined;
     let document = defaults(),
-      warning: string | undefined;
+      warning: string | undefined,
+      configRead = false;
     try {
       const raw = await readFile(join(this.directory, "config.json"), "utf8");
+      configRead = true;
       const value = JSON.parse(raw);
-      if (value.schemaVersion !== 2) {
+      if (value.schemaVersion !== 3) {
         await copyFile(
           join(this.directory, "config.json"),
           join(this.directory, `migration-backup-${Date.now()}.json`),
         );
-        if (value.schemaVersion !== 1)
+        if (![1, 2].includes(value.schemaVersion))
           throw new Error(
             `Unsupported schema version ${value.schemaVersion}; backup saved`,
           );
       }
       document = validateDocument(migrateDocument(value));
-      if (value.schemaVersion === 1)
+      if (value.schemaVersion !== 3)
         await this.atomic("config.json", JSON.stringify(document, null, 2));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        warning = `Configuration could not be loaded: ${String(error)}`;
+      if (configRead || (error as NodeJS.ErrnoException).code !== "ENOENT") {
+        warning = `Configuration could not be loaded: ${String(error)}. Workspace writes are blocked; restore or repair config.json and restart.`;
+        this.loadFailure = warning;
         await copyFile(
           join(this.directory, "config.json"),
           join(this.directory, `recovery-${Date.now()}.json`),
@@ -188,6 +224,7 @@ export class Persistence {
     return { document, runs, warning };
   }
   save(document: AppDocument, runs: RunRecord[]) {
+    if (this.loadFailure) return Promise.reject(new Error(this.loadFailure));
     const config = JSON.stringify(validateDocument(document), null, 2);
     const retained = runs.slice(-document.settings.historyLimit);
     while (JSON.stringify(retained).length > 4_000_000 && retained.length > 1)

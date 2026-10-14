@@ -197,7 +197,7 @@ export const deckSchema = z.object({
   activePageId: id,
 });
 export type DeckConfig = z.infer<typeof deckSchema>;
-export const documentSchema = legacyDocumentSchema
+export const v2DocumentSchema = legacyDocumentSchema
   .omit({ devices: true, activeProfileId: true, activePageId: true })
   .extend({
     schemaVersion: z.literal(2),
@@ -210,6 +210,60 @@ export const documentSchema = legacyDocumentSchema
         webEnabled: z.boolean().default(false),
         webPort: z.number().int().min(0).max(65535).default(9018),
       }),
+  });
+// Parse entries rather than z.record: z.record silently drops "__proto__",
+// which can be a legacy workflow ID. fromEntries safely retains it as own data.
+const workflowAliasesSchema = z.preprocess(
+  (value) =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? Object.entries(value)
+      : null,
+  z
+    .array(
+      z.tuple([
+        id.refine(
+          (value) => !z.uuid().safeParse(value).success,
+          "Workflow aliases must use legacy non-UUID identities",
+        ),
+        z.uuid(),
+      ]),
+    )
+    .max(10000)
+    .transform((entries) => Object.fromEntries(entries)),
+);
+export const documentSchema = v2DocumentSchema
+  .extend({
+    schemaVersion: z.literal(3),
+    workflows: z.array(workflowSchema.extend({ id: z.uuid() })).max(200),
+    workflowAliases: workflowAliasesSchema.default({}),
+  })
+  .superRefine((doc, ctx) => {
+    const workflowIds = new Set(doc.workflows.map((workflow) => workflow.id));
+    const documentIds = new Set([
+      ...doc.workflows.map((workflow) => workflow.id),
+      ...doc.connections.map((c) => c.id),
+      ...doc.decks.map((d) => d.id),
+      ...doc.profiles.flatMap((p) => [
+        p.id,
+        ...p.pages.flatMap((page) => [
+          page.id,
+          ...Object.values(page.keys).map((b) => b.id),
+        ]),
+      ]),
+    ]);
+    for (const [alias, target] of Object.entries(doc.workflowAliases)) {
+      // Targets may be tombstones after deletion. Never reuse their aliases.
+      if (
+        documentIds.has(alias) ||
+        Object.hasOwn(doc.workflowAliases, target) ||
+        (documentIds.has(target) && !workflowIds.has(target))
+      )
+        ctx.addIssue({
+          code: "custom",
+          path: ["workflowAliases", alias],
+          message: "Workflow alias collides with an identity or another alias",
+        });
+    }
   });
 export type AppDocument = z.infer<typeof documentSchema>;
 export type RunStatus =

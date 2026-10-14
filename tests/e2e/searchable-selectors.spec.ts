@@ -31,13 +31,13 @@ test.afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 async function seed(page: Page) {
-  await page.evaluate(async () => {
+  return page.evaluate(async () => {
     const snapshot = await window.decker.snapshot(),
       doc = snapshot.document;
     const original = doc.workflows[0];
     doc.workflows = Array.from({ length: 55 }, (_, i) => ({
       ...structuredClone(original),
-      id: `flow-${i}`,
+      id: crypto.randomUUID(),
       name: i === 51 || i === 52 ? "Duplicate flow" : `Flow ${i}`,
     }));
     doc.profiles = Array.from({ length: 55 }, (_, i) => ({
@@ -69,6 +69,7 @@ async function seed(page: Page) {
       document: doc,
       navigationEdits: [deck.id],
     });
+    return doc.workflows.map((workflow) => workflow.id);
   });
 }
 async function saved(page: Page) {
@@ -79,7 +80,7 @@ async function saved(page: Page) {
 
 test("55 flows stay compact, support keyboard search and duplicates, and create/rename/switch/relaunch", async () => {
   let page = await launch();
-  await seed(page);
+  const ids = await seed(page);
   await page.getByRole("button", { name: "Flows", exact: true }).click();
   const trigger = page.getByRole("button", { name: /^Workflow:/ });
   await expect(trigger).toHaveText("Flow 0");
@@ -135,7 +136,7 @@ test("55 flows stay compact, support keyboard search and duplicates, and create/
       async () =>
         (
           await page.evaluate(() => window.decker.snapshot())
-        ).document.workflows.find((f) => f.id === "flow-52")!.name,
+        ).document.workflows.find((workflow) => workflow.id === ids[52])!.name,
     )
     .toBe("Second duplicate");
   await page

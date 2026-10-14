@@ -3,7 +3,7 @@ import type { ActionInstance } from "./schema";
 export type Field = {
   key: string;
   label: string;
-  type?: "text" | "number" | "boolean" | "select" | "secret";
+  type?: "text" | "number" | "boolean" | "select" | "secret" | "workflow";
   options?: string[];
   default?: string | number | boolean;
   hint?: string;
@@ -276,7 +276,7 @@ const definitions: Omit<
     icon: "⑂",
     description: "Run a named workflow as a child of this run.",
     capabilities: [],
-    fields: [f("workflowId", "Workflow ID", "")],
+    fields: [f("workflowId", "Workflow", "", "workflow")],
     idempotent: false,
   },
   {
@@ -286,7 +286,7 @@ const definitions: Omit<
     icon: "■",
     description: "Cancel active runs for a workflow.",
     capabilities: [],
-    fields: [f("workflowId", "Workflow ID", "")],
+    fields: [f("workflowId", "Workflow", "", "workflow")],
     idempotent: true,
   },
 ];

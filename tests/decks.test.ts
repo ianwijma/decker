@@ -13,7 +13,7 @@ import {
 import { Persistence, validateDocument } from "../src/main/persistence";
 import { Triggers } from "../src/device/triggers";
 function legacy() {
-  const current = defaults();
+  const { workflowAliases: _aliases, ...current } = defaults();
   return {
     ...current,
     schemaVersion: 1,
@@ -36,7 +36,7 @@ it("migrates independent deck profiles, remaps folders and preserves original ID
   enter.press.action.config.pageId = "folder";
   old.profiles[0].pages[0].keys[8] = enter;
   const doc = migrateDocument(old);
-  expect(doc.schemaVersion).toBe(2);
+  expect(doc.schemaVersion).toBe(3);
   expect(doc.decks).toHaveLength(2);
   expect(doc.decks[1].brightness).toBe(45);
   expect(doc.profiles[0].pages[0].keys[16].id).toBe(enter.id);
@@ -54,7 +54,7 @@ it("backs up and persists v1 migration once, with no loss of assignments", async
     const store = new Persistence(directory);
     const result = await store.load();
     expect(result.warning).toBeUndefined();
-    expect(result.document.schemaVersion).toBe(2);
+    expect(result.document.schemaVersion).toBe(3);
     expect(
       (await readdir(directory)).filter((f) =>
         f.startsWith("migration-backup-"),
@@ -63,7 +63,7 @@ it("backs up and persists v1 migration once, with no loss of assignments", async
     expect(
       JSON.parse(await readFile(join(directory, "config.json"), "utf8"))
         .schemaVersion,
-    ).toBe(2);
+    ).toBe(3);
     expect((await store.load()).document).toEqual(result.document);
   } finally {
     await rm(directory, { recursive: true, force: true });

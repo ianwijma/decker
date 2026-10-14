@@ -38,11 +38,13 @@ export function binding(type: string, label?: string): KeyBinding {
 export function defaults(): AppDocument {
   const trigger = node("trigger", "Software or deck press"),
     delay = node("delay", "Take a breath"),
-    done = node("set", "Ready");
+    done = node("set", "Ready"),
+    welcomeId = uid();
   delay.config = { ms: 400 };
   done.config = { status: "Ready to create" };
   return documentSchema.parse({
-    schemaVersion: 2,
+    schemaVersion: 3,
+    workflowAliases: {},
     profiles: [
       {
         id: "default",
@@ -56,7 +58,7 @@ export function defaults(): AppDocument {
               1: binding("desktop.copy", "Copy greeting"),
               2: {
                 ...binding("desktop.notify", "Welcome flow"),
-                press: { kind: "workflow", workflowId: "welcome" },
+                press: { kind: "workflow", workflowId: welcomeId },
               },
               7: binding("deck.back", "Back"),
             },
@@ -66,7 +68,7 @@ export function defaults(): AppDocument {
     ],
     workflows: [
       {
-        id: "welcome",
+        id: welcomeId,
         name: "Welcome to Decker",
         revision: 1,
         graph: {
