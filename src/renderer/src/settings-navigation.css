@@ -1,0 +1,30 @@
+.settings-workspace {
+  min-width: 0;
+}
+
+.settings-navigation .profile-item[aria-current="page"] {
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.settings-workspace > .settings-screen,
+.settings-workspace > .runs-screen {
+  min-width: 0;
+}
+
+@media (max-width: 1250px) {
+  .settings-workspace > .settings-screen .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-workspace .page-heading,
+  .settings-workspace .card-heading,
+  .settings-workspace .card-heading > .row {
+    flex-wrap: wrap;
+  }
+
+  .settings-workspace .run-metrics,
+  .settings-workspace .runs-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
