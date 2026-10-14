@@ -1,3 +1,9 @@
+import {
+  obsTestRequestSchema,
+  obsSaveRequestSchema,
+  obsCancelRequestSchema,
+  obsHelpRequestSchema,
+} from "./obs-contract";
 import { z } from "zod";
 export const id = z.string().min(1).max(160);
 export const json: z.ZodType<Json> = z.lazy(() =>
@@ -354,6 +360,10 @@ export type Snapshot = {
   web: WebStatus;
 };
 export const requestSchema = z.discriminatedUnion("type", [
+  obsTestRequestSchema,
+  obsSaveRequestSchema,
+  obsCancelRequestSchema,
+  obsHelpRequestSchema,
   z.object({
     type: z.literal("save"),
     document: documentSchema,

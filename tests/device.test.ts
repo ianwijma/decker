@@ -108,6 +108,7 @@ it("derives mute and scene feedback from observed state only", async () => {
   const { observedAppearance } = await import("../src/shared/feedback");
   const b = binding("obs.control");
   if (b.press?.kind !== "action") throw new Error();
+  b.press.action.config.connectionId = "obs";
   b.press.action.config.operation = "scene";
   b.press.action.config.name = "Live";
   expect(

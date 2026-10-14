@@ -1,4 +1,5 @@
 import { expression } from "../../shared/data-contract";
+import { ObsConnectionDropdown } from "./ObsConnectionDropdown";
 import { WorkflowDropdown } from "./WorkflowDropdown";
 import { useApp } from "./store";
 import { selectFlowWorkflows, selectWorkflowAliases } from "./flow-selectors";
@@ -143,6 +144,11 @@ export function ActionFields({
                   label={`${field.label} JSON`}
                   value={value}
                   onChange={(v) => change(field, v)}
+                />
+              ) : field.type === "connection" ? (
+                <ObsConnectionDropdown
+                  value={String(value)}
+                  onSelect={(id) => change(field, id)}
                 />
               ) : field.type === "workflow" ? (
                 <WorkflowDropdown
