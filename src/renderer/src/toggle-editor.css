@@ -52,3 +52,14 @@
   padding: 8px;
   border-radius: 6px;
 }
+.deck-workspace .deck-key .toggle-key-state {
+  position: absolute;
+  z-index: 2;
+  inset: 2px 2px auto;
+  color: #fff;
+  background: #000d;
+  border-radius: 3px;
+  padding: 2px;
+  font-size: 8px;
+  line-height: 1.2;
+}

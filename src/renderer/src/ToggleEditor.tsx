@@ -723,7 +723,11 @@ function Preview({
         {appearance.asset ? (
           <img alt="" src={`decker-asset://${appearance.asset}`} />
         ) : (
-          <KeyIcon icon={appearance.icon} label={appearance.label} />
+          <KeyIcon
+            icon={appearance.icon}
+            label={appearance.label}
+            fallback=""
+          />
         )}
         <span>{appearance.label}</span>
       </div>

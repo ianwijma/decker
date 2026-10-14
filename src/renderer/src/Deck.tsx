@@ -280,11 +280,13 @@ export function Deck() {
                       icon={b?.appearance.icon ?? ""}
                       label={b?.appearance.label ?? ""}
                       fallback={
-                        (b?.press?.kind === "action"
-                          ? actionById(b.press.action.type)?.icon
-                          : b
-                            ? "⑂"
-                            : "+") ?? "✦"
+                        b?.toggle
+                          ? ""
+                          : ((b?.press?.kind === "action"
+                              ? actionById(b.press.action.type)?.icon
+                              : b
+                                ? "⑂"
+                                : "+") ?? "✦")
                       }
                     />
                   )}
@@ -495,6 +497,7 @@ export function Deck() {
                 <KeyIcon
                   icon={key.appearance.icon}
                   label={key.appearance.label}
+                  fallback={key.toggle ? "" : undefined}
                 />
               )}
               <small>{key.appearance.label}</small>

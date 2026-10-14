@@ -107,7 +107,10 @@ function renderKey(
       icon.setAttribute("aria-hidden", "true");
       icon.innerHTML = svg;
       button.append(icon);
-    } else button.append(element("span", key?.icon || "✦", "symbol"));
+    } else
+      button.append(
+        element("span", key?.icon || (key?.toggle ? "" : "✦"), "symbol"),
+      );
   }
   button.append(element("span", key?.label ?? "", "label"));
   if (key?.stateLabel)

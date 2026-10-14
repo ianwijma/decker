@@ -395,6 +395,7 @@ it("composes inherited and cleared artwork, legacy overrides, and temporary acti
     stateAppearance(b.appearance, { icon: "pack:lucide:v1:power" }).asset,
   ).toBeUndefined();
   expect(stateAppearance(b.appearance, { asset: null }).asset).toBeUndefined();
+  expect(stateAppearance(b.appearance, { icon: "" }).icon).toBe("");
   const observed = {
     buttonFeedback: {
       [activityKey(deckId, b)]: {

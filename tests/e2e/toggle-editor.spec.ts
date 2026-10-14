@@ -148,7 +148,14 @@ test("converts explicit conflicts, authors commands and appearances without effe
     page.getByLabel("Authored on preview (does not execute)"),
   ).toContainText("Enabled");
   await expect(readFile(marker, "utf8")).rejects.toThrow();
+  await page
+    .getByRole("group", { name: "off appearance", exact: true })
+    .getByRole("button", { name: "Clear icon", exact: true })
+    .click();
   await saveToggle();
+  await expect(
+    page.locator(".deck-key").first().locator(".key-symbol"),
+  ).toHaveText("");
   expect(await saved()).toMatchObject({
     toggle: {
       source: { kind: "app", initial: "off" },
