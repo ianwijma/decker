@@ -7,32 +7,41 @@ export type Scope = {
   index?: number;
   error?: Json;
 };
-const forbidden = new Set(["__proto__", "prototype", "constructor"]);
-export function readPath(scope: unknown, path: string): Json | undefined {
-  let current: unknown = scope;
-  for (const part of path.split(".")) {
-    if (
-      forbidden.has(part) ||
-      current === null ||
-      typeof current !== "object" ||
-      !Object.hasOwn(current, part)
-    )
-      return undefined;
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current as Json | undefined;
-}
+export { ownPath as readPath } from "../shared/data-contract";
+import {
+  boundedJson,
+  DataBudget,
+  expression,
+  inspectExpressions,
+  ownPath,
+} from "../shared/data-contract";
 export function resolve(value: Json, scope: Scope): Json {
-  if (Array.isArray(value)) return value.map((v) => resolve(v, scope));
-  if (value && typeof value === "object") {
-    if (typeof value.$ref === "string") {
-      let result = readPath(scope, value.$ref);
-      if (result === undefined) {
-        if (Object.hasOwn(value, "fallback"))
-          result = resolve(value.fallback, scope);
-        else throw new Error(`Missing data: ${value.$ref}`);
+  inspectExpressions(value);
+  const budget = new DataBudget();
+  const visit = (v: Json, depth: number): Json => {
+    budget.count(depth, typeof v === "string" ? v.length : 1);
+    const e = expression(v);
+    if (e) {
+      const object = v as Record<string, Json>;
+      if (e.kind === "literal") return budget.copy(object.$literal, depth);
+      if (e.kind === "template") {
+        const text = (object.$template as Json[])
+          .map((segment) => {
+            const result = visit(segment, depth + 1);
+            return typeof result === "string" ? result : JSON.stringify(result);
+          })
+          .join("");
+        budget.count(depth, text.length);
+        return text;
       }
-      switch (value.transform) {
+      let result = ownPath(scope, e.path);
+      if (result === undefined) {
+        if (Object.hasOwn(object, "fallback"))
+          result = visit(object.fallback, depth + 1);
+        else throw new Error(`Missing data: ${JSON.stringify(e.path)}`);
+      }
+      result = budget.copy(result, depth);
+      switch (object.transform) {
         case "string":
           return typeof result === "string" ? result : JSON.stringify(result);
         case "number": {
@@ -50,14 +59,17 @@ export function resolve(value: Json, scope: Scope): Json {
             ? result.length
             : 0;
         default:
-          return structuredClone(result);
+          return result;
       }
     }
-    return Object.fromEntries(
-      Object.entries(value).map(([k, v]) => [k, resolve(v, scope)]),
-    );
-  }
-  return value;
+    if (Array.isArray(v)) return v.map((x) => visit(x, depth + 1));
+    if (v && typeof v === "object")
+      return Object.fromEntries(
+        Object.entries(v).map(([key, x]) => [key, visit(x, depth + 1)]),
+      );
+    return v;
+  };
+  return boundedJson(visit(value, 0));
 }
 export function redact(value: unknown, secrets: string[] = []): Json {
   let budget = 16000,

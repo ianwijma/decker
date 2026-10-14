@@ -1,3 +1,6 @@
+import { decodeArgs } from "../shared/data-contract";
+import { extractValue, parseJson } from "../shared/data-actions";
+import { readHttpBody } from "./http-body";
 import { spawn } from "node:child_process";
 import { actionById } from "../shared/catalog";
 import type { AppDocument, Json } from "../shared/schema";
@@ -29,21 +32,14 @@ export function handlers(
       );
     const c = action.config,
       s = (key: string) => String(c[key] ?? ""),
-      args = () => {
-        const a = JSON.parse(s("args"));
-        if (
-          !Array.isArray(a) ||
-          !a.every((x) => typeof x === "string") ||
-          a.length > 256
-        )
-          throw new Error(
-            "Arguments must be a JSON array of strings (maximum 256)",
-          );
-        return a as string[];
-      };
+      args = () => decodeArgs(c.args);
     const perform = async (): Promise<Json> => {
       context.signal.throwIfAborted();
       switch (action.type) {
+        case "data.parseJson":
+          return parseJson(c.input);
+        case "data.extract":
+          return extractValue(c);
         case "app.launch":
           return new Promise((resolve, reject) => {
             const child = spawn(s("executable"), args(), {
@@ -115,25 +111,13 @@ export function handlers(
             signal: context.signal,
             redirect: secret ? "error" : "follow",
           });
-          const reader = response.body?.getReader();
-          let bytes = 0;
-          const chunks: Uint8Array[] = [];
-          try {
-            while (reader) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              const remaining = 16384 - bytes;
-              chunks.push(value.subarray(0, remaining));
-              bytes += value.length;
-              if (bytes >= 16384) break;
-            }
-          } finally {
-            await reader?.cancel();
-          }
-          const body = Buffer.concat(chunks).toString("utf8");
+          const { body, truncated } = await readHttpBody(
+            response,
+            context.signal,
+          );
           if (!response.ok)
             throw new Error(`HTTP ${response.status}: ${body.slice(0, 1000)}`);
-          return { status: response.status, body, truncated: bytes > 16384 };
+          return { status: response.status, body, truncated };
         }
         case "obs.control": {
           const connection = getDocument().connections.find(

@@ -1,3 +1,4 @@
+import { expression } from "../../shared/data-contract";
 import { WorkflowDropdown } from "./WorkflowDropdown";
 import { useApp } from "./store";
 import { selectFlowWorkflows, selectWorkflowAliases } from "./flow-selectors";
@@ -113,14 +114,29 @@ export function ActionFields({
     <div className="fields">
       <p className="muted small">{definition.description}</p>
       {definition.fields.map((field) => {
-        const value = action.config[field.key] ?? field.default ?? "",
-          bound = value !== null && typeof value === "object";
+        const value = Object.hasOwn(action.config, field.key)
+          ? action.config[field.key]
+          : (field.default ?? "");
+        let bound = false;
+        try {
+          bound = Boolean(expression(value));
+        } catch {
+          bound = true;
+        }
         return (
           <div key={field.key}>
             <FieldLabel label={field.label} hint={field.hint}>
               {bound ? (
                 <JsonEditor
                   label={`${field.label} binding`}
+                  value={value}
+                  onChange={(v) => change(field, v)}
+                />
+              ) : field.type === "json" ||
+                (value !== null && typeof value === "object") ||
+                value === null ? (
+                <JsonEditor
+                  label={`${field.label} JSON`}
                   value={value}
                   onChange={(v) => change(field, v)}
                 />
