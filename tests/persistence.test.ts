@@ -59,7 +59,7 @@ it("serializes writes, bounds history, and exports assets without credentials", 
   ]);
   expect((await s.load()).document.settings.accent).toBe("#123456");
   const exported = await s.export(doc);
-  expect(exported.document.connections[0]).not.toHaveProperty("credentialRef");
+  expect(exported.document.connections[0].credentialRef).toMatch(/^import:/);
   expect(exported.assets[asset]).toBe(Buffer.from("image").toString("base64"));
 });
 it("backs up unsupported versions and rejects folder cycles and unknown active pages", async () => {

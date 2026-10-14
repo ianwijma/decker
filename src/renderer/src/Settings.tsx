@@ -1,12 +1,5 @@
 import { useState } from "react";
-import {
-  Check,
-  Download,
-  Plus,
-  ShieldCheck,
-  Upload,
-  Trash2,
-} from "lucide-react";
+import { Check, Download, Plus, Upload, Trash2 } from "lucide-react";
 import { useApp } from "./store";
 import { uid } from "../../shared/defaults";
 import { Diagnostics } from "./Diagnostics";
@@ -14,6 +7,7 @@ import { Runs } from "./Runs";
 import { PairingApprovals } from "./DeckManager";
 import { FieldLabel } from "./components";
 import "./settings-navigation.css";
+import { InlineSecret, ActionSecretOwners } from "./InlineSecret";
 const accents = [
   "#5865f2",
   "#9b59b6",
@@ -26,11 +20,7 @@ const accents = [
 ];
 function GeneralSettings() {
   const { snapshot, edit, request } = useApp(),
-    doc = snapshot!.document,
-    [ref, setRef] = useState("obs-password"),
-    [secret, setSecret] = useState(""),
-    [persist, setPersist] = useState(false),
-    [saved, setSaved] = useState(false);
+    doc = snapshot!.document;
   return (
     <div className="settings-screen">
       <div className="page-heading">
@@ -111,7 +101,6 @@ function GeneralSettings() {
                     id: uid(),
                     name: "OBS Studio",
                     url: "ws://127.0.0.1:4455",
-                    credentialRef: "obs-password",
                   });
                 })
               }
@@ -179,85 +168,17 @@ function GeneralSettings() {
                     }}
                   />
                 </FieldLabel>
-                <FieldLabel label="Credential reference">
-                  <input
-                    value={c.credentialRef ?? ""}
-                    onChange={(e) =>
-                      edit((d) => {
-                        d.connections.find(
-                          (x) => x.id === c.id,
-                        )!.credentialRef = e.target.value || undefined;
-                      })
-                    }
-                  />
-                </FieldLabel>
+                <InlineSecret
+                  owner={JSON.stringify(["connection", c.id])}
+                  label="OBS password"
+                />
               </div>
               <small className="muted code">Connection ID: {c.id}</small>
             </div>
           ))}
         </section>
-        <section className="settings-card">
-          <div className="card-heading">
-            <div>
-              <h2>Credentials</h2>
-              <p>
-                {snapshot!.secureStorage
-                  ? "OS-backed encryption is available."
-                  : "Session-only storage · no secure keyring available."}
-              </p>
-            </div>
-            <ShieldCheck size={23} />
-          </div>
-          <FieldLabel label="Credential reference">
-            <input
-              aria-label="Credential reference"
-              value={ref}
-              onChange={(e) => setRef(e.target.value)}
-            />
-          </FieldLabel>
-          <FieldLabel label="Secret">
-            <input
-              aria-label="Secret"
-              type="password"
-              autoComplete="new-password"
-              value={secret}
-              onChange={(e) => {
-                setSecret(e.target.value);
-                setSaved(false);
-              }}
-            />
-          </FieldLabel>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={persist}
-              disabled={!snapshot!.secureStorage}
-              onChange={(e) => setPersist(e.target.checked)}
-            />{" "}
-            Persist with OS encryption
-          </label>
-          <button
-            disabled={!ref || !secret}
-            className="primary"
-            onClick={async () => {
-              const result = await request({
-                type: "credential",
-                ref,
-                value: secret,
-                persist,
-              });
-              if (result !== undefined) {
-                setSecret("");
-                setSaved(true);
-              }
-            }}
-          >
-            {saved ? "Saved" : "Save credential"}
-          </button>
-          <p className="muted small">
-            Secret values are never sent to the editor or included in workspace
-            exports. References can be used by HTTP and OBS actions.
-          </p>
+        <section className="settings-card full-width">
+          <ActionSecretOwners />
         </section>
         <section className="settings-card">
           <div className="card-heading">

@@ -133,15 +133,12 @@ test("General retains preferences and transfer entry points while decks stay in 
     page.getByRole("heading", { name: "Connections", exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Add OBS" })).toBeEnabled();
+  await page.getByRole("button", { name: "Add OBS" }).click();
   await expect(
-    page.getByLabel("Credential reference", { exact: true }),
-  ).toBeEditable();
-  await expect(page.getByLabel("Secret", { exact: true })).toHaveAttribute(
-    "type",
-    "password",
-  );
+    page.getByLabel("OBS password entry", { exact: true }),
+  ).toHaveAttribute("type", "password");
   await expect(
-    page.getByRole("button", { name: "Save credential" }),
+    page.getByRole("button", { name: "Save secret", exact: true }),
   ).toBeDisabled();
 
   // Exercise both entry points without opening a native dialog or importing data.

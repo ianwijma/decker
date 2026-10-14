@@ -622,7 +622,7 @@ describe("HTTP data pipeline", () => {
     a.config.url = url;
     a.config.credentialRef = "missing";
     await expect(handler()(a, context())).rejects.toThrow(
-      /Credential unavailable/,
+      /Bearer token is missing or locked\. Open this HTTP action and enter or replace its token/,
     );
     a.config.credentialRef = "test";
     a.config.url = url + "/redirect";

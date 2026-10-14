@@ -1,6 +1,7 @@
 import { decodeArgs } from "../shared/data-contract";
 import { extractValue, parseJson } from "../shared/data-actions";
 import { readHttpBody } from "./http-body";
+import { lookupSecret, protectSecret } from "../shared/secret-redaction";
 import { spawn } from "node:child_process";
 import { actionById } from "../shared/catalog";
 import type { AppDocument, Json } from "../shared/schema";
@@ -100,10 +101,12 @@ export function handlers(
           )
             throw new Error("Use an HTTP(S) URL without embedded credentials");
           const secret = s("credentialRef")
-            ? secrets()[s("credentialRef")]
+            ? lookupSecret(secrets(), s("credentialRef"))
             : undefined;
           if (s("credentialRef") && !secret)
-            throw new Error("Credential unavailable; add it in Settings");
+            throw new Error(
+              "Bearer token is missing or locked. Open this HTTP action and enter or replace its token; unlock the keyring and restart for stored tokens.",
+            );
           const response = await fetch(url, {
             method: s("method"),
             body: ["GET", "HEAD"].includes(s("method"))
@@ -126,10 +129,17 @@ export function handlers(
             (x) => x.id === s("connectionId"),
           );
           if (!connection) throw new Error("OBS connection is not configured");
+          if (
+            connection.credentialRef &&
+            !lookupSecret(secrets(), connection.credentialRef)
+          )
+            throw new Error(
+              "OBS password is missing or locked. Open this connection in Settings and enter or replace its password.",
+            );
           return obs.execute(
             connection,
             connection.credentialRef
-              ? secrets()[connection.credentialRef]
+              ? lookupSecret(secrets(), connection.credentialRef)
               : undefined,
             c,
             context.signal,
@@ -139,12 +149,16 @@ export function handlers(
           return main(action.type, c, context);
       }
     };
-    return def.resource
-      ? locks.run(
-          `${def.resource}:${def.resource === "obs" ? s("connectionId") : def.resource === "audio" ? s("target") : ""}`,
-          context.signal,
-          perform,
-        )
-      : perform();
+    const execute = () =>
+      def.resource
+        ? locks.run(
+            `${def.resource}:${def.resource === "obs" ? s("connectionId") : def.resource === "audio" ? s("target") : ""}`,
+            context.signal,
+            perform,
+          )
+        : perform();
+    return action.type === "http.request"
+      ? protectSecret(lookupSecret(secrets(), s("credentialRef")), execute)
+      : execute();
   };
 }

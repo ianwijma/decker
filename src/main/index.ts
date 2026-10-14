@@ -31,6 +31,11 @@ import {
 import { z } from "zod";
 import { Persistence, validateDocument, validateImport } from "./persistence";
 import { Credentials } from "./credentials";
+import { mutateCredential } from "./credential-mutations";
+import {
+  credentialOwners,
+  rekeyCredentials,
+} from "../shared/credential-owners";
 import { defaults, uid } from "../shared/defaults";
 import {
   requestSchema,
@@ -38,6 +43,7 @@ import {
   type Json,
   type RunRecord,
   type Snapshot,
+  type Request,
   type WebStatus,
   type WebDeckView,
 } from "../shared/schema";
@@ -93,6 +99,7 @@ const workers = new Map<
 >();
 let publishTimer: ReturnType<typeof setTimeout> | undefined,
   persistTimer: ReturnType<typeof setTimeout> | undefined;
+let credentialEpoch = uid();
 const snapshot = (): Snapshot => {
   const secrets = Object.values(credentials?.all() ?? {});
   const safeObserved = Object.fromEntries(
@@ -142,6 +149,16 @@ const snapshot = (): Snapshot => {
     observed: safeObserved,
     health,
     secureStorage: credentials.secure,
+    credentialState: {
+      epoch: credentialEpoch,
+      persistent: credentials.writable,
+      owners: Object.fromEntries(
+        credentialOwners(document).map((o) => [
+          o.key,
+          credentials.status(o.ref),
+        ]),
+      ),
+    },
   };
 };
 function publish() {
@@ -166,8 +183,7 @@ function persist() {
   if (persistTimer) return;
   persistTimer = setTimeout(() => {
     persistTimer = undefined;
-    void store
-      .save(document, runs)
+    void enqueueMutation(() => store.save(document, runs))
       .then(() => {
         diagnosticFaults.clear("persistence");
         publish();
@@ -343,6 +359,25 @@ function navigate(deckId: string, profileId: string, pageId: string) {
   persist();
 }
 async function mainAction(
+  ...args: Parameters<typeof performMainAction>
+): Promise<Json> {
+  return ["deck.page", "deck.profile", "deck.back", "deck.brightness"].includes(
+    args[0],
+  )
+    ? enqueueMutation(async () => {
+        // A run can cancel while a credential/document commit holds this queue.
+        // Never apply its delayed navigation or brightness after it has settled.
+        if (
+          !runs.some(
+            (run) => run.id === args[2].runId && run.status === "running",
+          )
+        )
+          throw new Error("Run is no longer active");
+        return performMainAction(...args);
+      })
+    : performMainAction(...args);
+}
+async function performMainAction(
   action: string,
   c: Record<string, Json>,
   context: {
@@ -640,8 +675,30 @@ async function startup(enabled: boolean) {
       if (error.code !== "ENOENT") throw error;
     });
 }
-async function handle(raw: unknown) {
+let requests: Promise<unknown> = Promise.resolve();
+function enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = requests.catch(() => {}).then(operation);
+  requests = result;
+  return result;
+}
+function handle(raw: unknown) {
   const request = requestSchema.parse(raw);
+  // Only document mutations share this queue. Cancellation and runner requests
+  // remain responsive while storage or a native dialog is pending.
+  return [
+    "save",
+    "credential",
+    "import",
+    "addDeck",
+    "deleteDeck",
+    "copyProfile",
+    "navigate",
+    "selectDeck",
+  ].includes(request.type)
+    ? enqueueMutation(() => handleRequest(request))
+    : handleRequest(request);
+}
+async function handleRequest(request: Request) {
   switch (request.type) {
     case "save": {
       const next = request.document;
@@ -685,8 +742,9 @@ async function handle(raw: unknown) {
         )
           triggers.disconnectDeck(old.id);
       }
+      await store.save(next, runs);
       document = next;
-      await store.save(document, runs);
+      credentialEpoch = uid();
       configure();
       return snapshot();
     }
@@ -747,6 +805,7 @@ async function handle(raw: unknown) {
       const id = uid(),
         profileId = uid(),
         pageId = uid();
+      credentialEpoch = uid();
       document.decks.push({
         id,
         name: request.name,
@@ -776,6 +835,7 @@ async function handle(raw: unknown) {
       const deck = document.decks.find((d) => d.id === request.deckId);
       if (!deck) throw new Error("Deck not found");
       triggers.disconnectDeck(deck.id);
+      credentialEpoch = uid();
       document.decks = document.decks.filter((d) => d.id !== deck.id);
       document.profiles = document.profiles.filter(
         (p) => !deck.profileIds.includes(p.id),
@@ -792,6 +852,7 @@ async function handle(raw: unknown) {
       if (!deck || !profile) throw new Error("Deck or profile not found");
       const copy = cloneProfiles([profile]).profiles[0];
       copy.name += " copy";
+      credentialEpoch = uid();
       document.profiles.push(copy);
       deck.profileIds.push(copy.id);
       await store.save(document, runs);
@@ -853,10 +914,18 @@ async function handle(raw: unknown) {
       persist();
       publish();
       return null;
-    case "credential":
-      await credentials.set(request.ref, request.value, request.persist);
+    case "credential": {
+      document = await mutateCredential(
+        document,
+        credentialEpoch,
+        request,
+        credentials,
+        (next) => store.save(next, runs),
+      );
+      credentialEpoch = uid();
       configure();
-      return null;
+      return snapshot();
+    }
     case "pickFile":
       return pickDesktopFile((options) =>
         dialog.showOpenDialog(window!, options),
@@ -899,7 +968,10 @@ async function handle(raw: unknown) {
       const bytes = await readFile(result.filePaths[0]);
       if (bytes.length > 20_000_000) throw new Error("Import exceeds 20 MB");
       const imported = JSON.parse(bytes.toString());
-      const next = validateImport(imported.document ?? imported);
+      const next = rekeyCredentials(
+        validateImport(imported.document ?? imported),
+        () => `managed:${uid()}`,
+      );
       const review =
         JSON.stringify(
           next.profiles.map((p) => ({ name: p.name, pages: p.pages })),
@@ -935,16 +1007,15 @@ async function handle(raw: unknown) {
       triggers.disconnect();
       for (const r of runs.filter((r) => r.status === "running"))
         post("runner", { type: "cancel", id: r.id });
-      next.connections = next.connections.map(
-        ({ credentialRef: _ref, ...c }) => c,
-      );
+
       next.settings.launchAtLogin = document.settings.launchAtLogin;
       post("web", { type: "resetPairings" });
       lastWebConfigure = "";
       next.settings.webEnabled = false;
+      await store.save(next, runs);
       document = next;
+      credentialEpoch = uid();
       feedback.clear();
-      await store.save(document, runs);
       configure();
       return snapshot();
     }

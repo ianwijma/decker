@@ -336,6 +336,8 @@ export type DeviceState =
   | "open-error"
   | "io-error"
   | "disconnected";
+export type CredentialStatus =
+  "configured" | "missing" | "locked" | "session-only";
 export type Snapshot = {
   document: AppDocument;
   runs: RunRecord[];
@@ -344,6 +346,11 @@ export type Snapshot = {
   observed: Record<string, Json>;
   health?: import("./health").HealthRecord[];
   secureStorage: boolean;
+  credentialState?: {
+    epoch: string;
+    persistent: boolean;
+    owners: Record<string, CredentialStatus>;
+  };
   web: WebStatus;
 };
 export const requestSchema = z.discriminatedUnion("type", [
@@ -378,12 +385,22 @@ export const requestSchema = z.discriminatedUnion("type", [
   z
     .object({ type: z.literal("pickFile"), picker: z.literal("openFile") })
     .strict(),
-  z.object({
-    type: z.literal("credential"),
-    ref: id,
-    value: z.string().max(16000),
-    persist: z.boolean(),
-  }),
+  z
+    .object({
+      type: z.literal("credential"),
+      epoch: id,
+      owner: z.string().min(1).max(10000),
+      operation: z.enum(["set", "remove"]),
+      value: z.string().max(16000).default(""),
+      persist: z.boolean().default(false),
+    })
+    .strict()
+    .superRefine((request, ctx) => {
+      if (request.operation === "set" && !request.value)
+        ctx.addIssue({ code: "custom", message: "Enter a password or token" });
+      if (request.operation === "remove" && (request.value || request.persist))
+        ctx.addIssue({ code: "custom", message: "Invalid remove request" });
+    }),
   z.object({ type: z.literal("diagnose") }),
   z.object({
     type: z.literal("diagnosticRemedy"),
