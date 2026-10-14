@@ -1,0 +1,32 @@
+.data-binding,
+.data-picker,
+.data-template {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.data-binding {
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.data-segment {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.data-binding textarea,
+.data-binding input,
+.data-binding select {
+  max-width: 100%;
+}
+.data-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+}
+.data-preview {
+  margin: 12px 0;
+}

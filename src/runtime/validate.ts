@@ -1,3 +1,4 @@
+import { outputAvailability } from "../shared/data-availability";
 import { inspectExpressions } from "../shared/data-contract";
 import {
   findWorkflow,
@@ -18,11 +19,9 @@ export function validateWorkflow(
     if (ids.size !== g.nodes.length)
       errors.push(`${prefix}: duplicate node IDs`);
     if (!ids.has(g.entry)) errors.push(`${prefix}: entry node missing`);
-    const incoming = new Map<string, string[]>();
     for (const e of g.edges) {
       if (!ids.has(e.source) || !ids.has(e.target))
         errors.push(`${prefix}: dangling edge ${e.id}`);
-      incoming.set(e.target, [...(incoming.get(e.target) ?? []), e.source]);
     }
     const visiting = new Set<string>(),
       visited = new Set<string>();
@@ -41,21 +40,7 @@ export function validateWorkflow(
     for (const n of g.nodes)
       if (!visited.has(n.id))
         errors.push(`${prefix}: ${n.name} is unreachable`);
-    const dominators = new Map<string, Set<string>>();
-    for (const n of g.nodes)
-      dominators.set(n.id, n.id === g.entry ? new Set() : new Set(ids));
-    for (let i = 0; i < g.nodes.length; i++)
-      for (const n of g.nodes.filter((n) => n.id !== g.entry)) {
-        const parents = incoming.get(n.id) ?? [];
-        let common: Set<string> | undefined;
-        for (const p of parents) {
-          const set = new Set([...(dominators.get(p) ?? []), p]);
-          common = common
-            ? new Set([...common].filter((x) => set.has(x)))
-            : set;
-        }
-        dominators.set(n.id, common ?? new Set());
-      }
+    const availability = outputAvailability(g, outerAvailable);
     const refs = (value: Json, available: Set<string>, label: string) => {
       try {
         inspectExpressions(value, ([root, key], hasFallback) => {
@@ -76,10 +61,7 @@ export function validateWorkflow(
     };
     for (const n of g.nodes) {
       const label = `${prefix} / ${n.name}`,
-        available = new Set([
-          ...outerAvailable,
-          ...(dominators.get(n.id) ?? []),
-        ]);
+        available = availability.get(n.id)!;
       refs(n.config, available, label);
       if (n.action) refs(n.action.config, available, label);
       const allowedPorts =

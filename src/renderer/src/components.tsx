@@ -1,5 +1,10 @@
 import { expression } from "../../shared/data-contract";
 import { ObsConnectionDropdown } from "./ObsConnectionDropdown";
+import {
+  destinationType,
+  type DataChoice,
+} from "../../shared/data-presentation";
+import { ExpressionEditor } from "./ExpressionEditor";
 import { WorkflowDropdown } from "./WorkflowDropdown";
 import { useApp } from "./store";
 import { selectFlowWorkflows, selectWorkflowAliases } from "./flow-selectors";
@@ -90,12 +95,12 @@ export function ActionFields({
   action,
   onChange,
   bindings = false,
-  available = [],
+  choices = [],
 }: {
   action: ActionInstance;
   onChange: (action: ActionInstance) => void;
   bindings?: boolean;
-  available?: string[];
+  choices?: DataChoice[];
 }) {
   const workflows = useApp(selectFlowWorkflows),
     aliases = useApp(selectWorkflowAliases);
@@ -124,53 +129,44 @@ export function ActionFields({
         const value = Object.hasOwn(action.config, field.key)
           ? action.config[field.key]
           : (field.default ?? "");
-        let bound = false;
-        try {
-          bound = Boolean(expression(value));
-        } catch {
-          bound = true;
-        }
-        return (
-          <div key={field.key}>
+        const literalEditor = (
+          value: Json,
+          setValue: (value: Json) => void,
+        ) => (
+          <>
             <FieldLabel label={field.label} hint={field.hint}>
-              {bound ? (
-                <JsonEditor
-                  label={`${field.label} binding`}
-                  value={value}
-                  onChange={(v) => change(field, v)}
-                />
-              ) : field.type === "json" ||
-                (value !== null && typeof value === "object") ||
-                value === null ? (
+              {field.type === "json" ||
+              (value !== null && typeof value === "object") ||
+              value === null ? (
                 <JsonEditor
                   label={`${field.label} JSON`}
                   value={value}
-                  onChange={(v) => change(field, v)}
+                  onChange={(v) => setValue(v)}
                 />
               ) : field.type === "connection" ? (
                 <ObsConnectionDropdown
                   value={String(value)}
-                  onSelect={(id) => change(field, id)}
+                  onSelect={(id) => setValue(id)}
                 />
               ) : field.type === "workflow" ? (
                 <WorkflowDropdown
                   workflows={workflows}
                   aliases={aliases}
                   value={String(value)}
-                  onSelect={(id) => change(field, id)}
+                  onSelect={(id) => setValue(id)}
                 />
               ) : field.type === "boolean" ? (
                 <input
                   aria-label={field.label}
                   type="checkbox"
                   checked={Boolean(value)}
-                  onChange={(e) => change(field, e.target.checked)}
+                  onChange={(e) => setValue(e.target.checked)}
                 />
               ) : field.options ? (
                 <select
                   aria-label={field.label}
                   value={String(value)}
-                  onChange={(e) => change(field, e.target.value)}
+                  onChange={(e) => setValue(e.target.value)}
                 >
                   {field.options.map((o) => (
                     <option key={o}>{o}</option>
@@ -182,7 +178,7 @@ export function ActionFields({
                 <textarea
                   aria-label={field.label}
                   value={String(value)}
-                  onChange={(e) => change(field, e.target.value)}
+                  onChange={(e) => setValue(e.target.value)}
                   rows={3}
                 />
               ) : (
@@ -191,8 +187,7 @@ export function ActionFields({
                   type={field.type === "number" ? "number" : "text"}
                   value={String(value)}
                   onChange={(e) =>
-                    change(
-                      field,
+                    setValue(
                       field.type === "number"
                         ? Number(e.target.value)
                         : e.target.value,
@@ -201,6 +196,35 @@ export function ActionFields({
                 />
               )}
             </FieldLabel>
+          </>
+        );
+        let bound = false;
+        try {
+          bound = Boolean(expression(value));
+        } catch {
+          bound = true;
+        }
+        return (
+          <div key={field.key}>
+            {bindings ? (
+              <ExpressionEditor
+                label={field.label}
+                value={value}
+                defaultValue={field.default ?? ""}
+                destination={destinationType(action.type, field)}
+                choices={choices}
+                onChange={(v) => change(field, v)}
+                renderLiteral={literalEditor}
+              />
+            ) : bound ? (
+              <JsonEditor
+                label={`${field.label} binding`}
+                value={value}
+                onChange={(v) => change(field, v)}
+              />
+            ) : (
+              literalEditor(value, (v) => change(field, v))
+            )}
             {field.type === "file" && field.picker === "openFile" && (
               <FilePickerButton
                 scope={scope}
@@ -209,27 +233,6 @@ export function ActionFields({
                 label={field.label}
                 onSelect={(path) => change(field, path)}
               />
-            )}
-            {bindings && (
-              <select
-                className="binding-picker"
-                aria-label={`Bind ${field.label}`}
-                value=""
-                onChange={(e) => {
-                  if (e.target.value === "literal")
-                    change(field, field.default ?? "");
-                  else if (e.target.value)
-                    change(field, { $ref: e.target.value });
-                }}
-              >
-                <option value="">Insert data reference…</option>
-                <option value="literal">Use literal value</option>
-                {available.map((path) => (
-                  <option key={path} value={path}>
-                    {path}
-                  </option>
-                ))}
-              </select>
             )}
           </div>
         );
