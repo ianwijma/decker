@@ -15,6 +15,7 @@ import {
   type AppDocument,
   type RunRecord,
 } from "../shared/schema";
+import { migrateDocument } from "../shared/decks";
 import { defaults } from "../shared/defaults";
 import { actionById } from "../shared/catalog";
 import { validateWorkflow } from "../runtime/validate";
@@ -50,13 +51,44 @@ export function validateDocument(value: unknown): AppDocument {
         "OBS connections require ws:// or wss:// without embedded credentials",
       );
   }
-  const profile = doc.profiles.find((p) => p.id === doc.activeProfileId);
-  if (!profile?.pages.some((p) => p.id === doc.activePageId))
-    throw new Error("Active profile/page is missing");
+  const owned = new Set<string>(),
+    hardware = new Set<string>();
+  for (const deck of doc.decks) {
+    unique(deck.id);
+    for (const profileId of deck.profileIds) {
+      if (owned.has(profileId) || !doc.profiles.some((p) => p.id === profileId))
+        throw new Error("Deck profile ownership is invalid");
+      owned.add(profileId);
+    }
+    if (
+      !deck.profileIds.includes(deck.activeProfileId) ||
+      !doc.profiles
+        .find((p) => p.id === deck.activeProfileId)
+        ?.pages.some((p) => p.id === deck.activePageId)
+    )
+      throw new Error("Active profile/page is missing");
+    if (deck.kind === "hardware") {
+      if (
+        !deck.hardwareId ||
+        hardware.has(deck.hardwareId) ||
+        deck.hardwareId.startsWith("session:")
+      )
+        throw new Error("Hardware identity must be stable and unique");
+      hardware.add(deck.hardwareId);
+    }
+  }
+  if (owned.size !== doc.profiles.length)
+    throw new Error("Every profile must belong to one deck");
+  if (
+    doc.decks.length
+      ? !doc.decks.some((d) => d.id === doc.activeDeckId)
+      : doc.activeDeckId !== ""
+  )
+    throw new Error("Active deck is missing");
   return doc;
 }
 export function validateImport(value: unknown): AppDocument {
-  const doc = validateDocument(value);
+  const doc = validateDocument(migrateDocument(value));
   for (const profile of doc.profiles)
     for (const page of profile.pages)
       for (const binding of Object.values(page.keys))
@@ -105,16 +137,19 @@ export class Persistence {
     try {
       const raw = await readFile(join(this.directory, "config.json"), "utf8");
       const value = JSON.parse(raw);
-      if (value.schemaVersion !== 1) {
+      if (value.schemaVersion !== 2) {
         await copyFile(
           join(this.directory, "config.json"),
           join(this.directory, `migration-backup-${Date.now()}.json`),
         );
-        throw new Error(
-          `Unsupported schema version ${value.schemaVersion}; backup saved`,
-        );
+        if (value.schemaVersion !== 1)
+          throw new Error(
+            `Unsupported schema version ${value.schemaVersion}; backup saved`,
+          );
       }
-      document = validateDocument(value);
+      document = validateDocument(migrateDocument(value));
+      if (value.schemaVersion === 1)
+        await this.atomic("config.json", JSON.stringify(document, null, 2));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         warning = `Configuration could not be loaded: ${String(error)}`;
@@ -179,15 +214,16 @@ export class Persistence {
     return hash;
   }
   async export(document: AppDocument) {
-    const hashes = new Set(
-      document.profiles.flatMap((p) =>
+    const hashes = new Set([
+      ...document.decks.flatMap((deck) => (deck.asset ? [deck.asset] : [])),
+      ...document.profiles.flatMap((p) =>
         p.pages.flatMap((page) =>
           Object.values(page.keys).flatMap((k) =>
             k.appearance.asset ? [k.appearance.asset] : [],
           ),
         ),
       ),
-    );
+    ]);
     const assets: Record<string, string> = {};
     for (const hash of hashes)
       assets[hash] = (await readFile(join(this.assetDirectory, hash))).toString(

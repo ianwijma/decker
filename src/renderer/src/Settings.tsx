@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { useApp } from "./store";
 import { uid } from "../../shared/defaults";
+import { Runs } from "./Runs";
+import { PairingApprovals } from "./DeckManager";
 import { FieldLabel } from "./components";
 const accents = [
   "#5865f2",
@@ -22,7 +24,7 @@ const accents = [
   "#00a8a8",
   "#3498db",
 ];
-export function Settings() {
+function GeneralSettings() {
   const { snapshot, edit, request } = useApp(),
     doc = snapshot!.document,
     [ref, setRef] = useState("obs-password"),
@@ -117,81 +119,21 @@ export function Settings() {
               <span className="status-dot" />
             </div>
           ))}
-          <label className="toggle-row">
-            <span>
-              <strong>XL simulator</strong>
-              <small>Configure and test all 32 keys without hardware.</small>
-            </span>
-            <input
-              type="checkbox"
-              role="switch"
-              checked={doc.settings.simulator}
-              onChange={(e) =>
-                edit((d) => {
-                  d.settings.simulator = e.target.checked;
-                })
-              }
-            />
-          </label>
-          <FieldLabel label={`Brightness · ${doc.settings.brightness}%`}>
-            <input
-              aria-label="Brightness"
-              type="range"
-              min={0}
-              max={100}
-              value={doc.settings.brightness}
-              onChange={(e) =>
-                edit((d) => {
-                  d.settings.brightness = Number(e.target.value);
-                })
-              }
-            />
-          </FieldLabel>
-          <p className="muted small">
-            Reconnect restores the current page and brightness. Physical
-            hardware has not been verified in this environment.
-          </p>
-        </section>
-        <section className="settings-card full-width">
-          <div className="card-heading">
-            <div>
-              <h2>Linux capabilities</h2>
-              <p>
-                Availability is checked against the current desktop session.
-              </p>
-            </div>
-            <button onClick={() => void request({ type: "diagnose" })}>
-              <RefreshCw size={15} /> Recheck
+          {doc.decks.map((deck) => (
+            <button
+              className="wide"
+              key={deck.id}
+              onClick={() => {
+                void request({ type: "selectDeck", deckId: deck.id });
+                useApp.getState().setTab("deck");
+              }}
+            >
+              {deck.icon} {deck.name} · {deck.kind}
             </button>
-          </div>
-          <div className="capabilities">
-            {snapshot!.capabilities.length ? (
-              snapshot!.capabilities.map((c) => (
-                <div className="capability" key={c.id}>
-                  <span
-                    className={`status-dot ${c.available ? "" : "unavailable"}`}
-                  />
-                  <div>
-                    <strong>{c.id}</strong>
-                    <p>{c.detail}</p>
-                  </div>
-                  <span className="tag">
-                    {c.available ? "Available" : "Unavailable"}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <p className="muted">Checking desktop services…</p>
-            )}
-          </div>
-          <details>
-            <summary>Observed integration state</summary>
-            <pre>{JSON.stringify(snapshot!.observed, null, 2)}</pre>
-          </details>
+          ))}
           <p className="muted small">
-            Keyboard input currently requires X11. MPRIS uses the session bus.
-            Install xdotool and PipeWire/PulseAudio tools for desktop controls.
-            USB setup is documented in README.
+            Choose a deck in the sidebar to change its icon, layout, profiles
+            and device settings.
           </p>
         </section>
         <section className="settings-card full-width">
@@ -434,6 +376,219 @@ export function Settings() {
               </button>
             </div>
           </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+export function Settings() {
+  const { settingsSection: section, setSettingsSection: setSection } = useApp();
+  return (
+    <div className="settings-workspace">
+      <aside className="secondary-sidebar">
+        <div className="section-heading">SETTINGS</div>
+        {[
+          { id: "general", name: "General" },
+          { id: "web", name: "Web decks" },
+          { id: "diagnostics", name: "Diagnostics" },
+        ].map((item) => (
+          <button
+            key={item.id}
+            className={`profile-item ${section === item.id || (item.id === "diagnostics" && section === "runs") ? "active" : ""}`}
+            onClick={() => setSection(item.id as typeof section)}
+          >
+            {item.name}
+          </button>
+        ))}
+        {(section === "diagnostics" || section === "runs") && (
+          <button
+            className={`profile-item subnav-item ${section === "runs" ? "active" : ""}`}
+            onClick={() => setSection("runs")}
+          >
+            Run history
+          </button>
+        )}
+      </aside>
+      {section === "general" ? (
+        <GeneralSettings />
+      ) : section === "web" ? (
+        <WebSettings />
+      ) : section === "runs" ? (
+        <Runs />
+      ) : (
+        <Diagnostics />
+      )}
+    </div>
+  );
+}
+function Diagnostics() {
+  const { snapshot, request, setSettingsSection } = useApp();
+  return (
+    <div className="settings-screen">
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">DIAGNOSTICS</div>
+          <h1>Understand your workspace.</h1>
+          <p>Integration availability and execution history.</p>
+        </div>
+        <button onClick={() => setSettingsSection("runs")}>
+          Open run history
+        </button>
+      </div>
+      <div className="settings-layout">
+        <section className="settings-card full-width">
+          <div className="card-heading">
+            <div>
+              <h2>Linux capabilities</h2>
+              <p>
+                Availability is checked against the current desktop session.
+              </p>
+            </div>
+            <button onClick={() => void request({ type: "diagnose" })}>
+              <RefreshCw size={15} /> Recheck
+            </button>
+          </div>
+          <div className="capabilities">
+            {snapshot!.capabilities.length ? (
+              snapshot!.capabilities.map((c) => (
+                <div className="capability" key={c.id}>
+                  <span
+                    className={`status-dot ${c.available ? "" : "unavailable"}`}
+                  />
+                  <div>
+                    <strong>{c.id}</strong>
+                    <p>{c.detail}</p>
+                  </div>
+                  <span className="tag">
+                    {c.available ? "Available" : "Unavailable"}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="muted">Checking desktop services…</p>
+            )}
+          </div>
+          <details>
+            <summary>Observed integration state</summary>
+            <pre>{JSON.stringify(snapshot!.observed, null, 2)}</pre>
+          </details>
+          <p className="muted small">
+            Keyboard input currently requires X11. MPRIS uses the session bus.
+            Install xdotool and PipeWire/PulseAudio tools for desktop controls.
+            USB setup is documented in README.
+          </p>
+        </section>
+      </div>
+    </div>
+  );
+}
+function WebSettings() {
+  const { snapshot, edit, request } = useApp(),
+    doc = snapshot!.document;
+  return (
+    <div className="settings-screen">
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">LOCAL NETWORK</div>
+          <h1>Web decks</h1>
+          <p>Operate your decks from a phone or tablet browser.</p>
+        </div>
+      </div>
+      <div className="settings-layout">
+        <section className="settings-card full-width">
+          <label className="toggle-row">
+            <span>
+              <strong>Enable local web decks</strong>
+              <small>
+                Allow paired browsers on your local network to operate
+                configured keys.
+              </small>
+            </span>
+            <input
+              role="switch"
+              aria-label="Enable local web decks"
+              type="checkbox"
+              checked={doc.settings.webEnabled}
+              onChange={(e) =>
+                edit((d) => {
+                  d.settings.webEnabled = e.target.checked;
+                })
+              }
+            />
+          </label>
+          <FieldLabel label="Local port">
+            <input
+              aria-label="Local port"
+              type="number"
+              min={0}
+              max={65535}
+              defaultValue={doc.settings.webPort}
+              onBlur={(e) => {
+                const value = Number(e.target.value);
+                if (Number.isInteger(value) && value >= 0 && value <= 65535)
+                  edit((d) => {
+                    d.settings.webPort = value;
+                  });
+              }}
+            />
+          </FieldLabel>
+          <p className="muted small">
+            {snapshot!.web.running
+              ? `Sharing is available on port ${snapshot!.web.port}.`
+              : "Sharing is paused."}{" "}
+            Local transport uses HTTP. Use a trusted network; no internet access
+            or cloud account is required. Decker must stay running.
+          </p>
+          {snapshot!.web.urls.map((url) => (
+            <p key={url} className="muted code small">
+              {url}
+            </p>
+          ))}
+          {snapshot!.web.error && (
+            <div className="error-box">{snapshot!.web.error}</div>
+          )}
+        </section>
+        <section className="settings-card full-width">
+          <h2>Pairing requests</h2>
+          <p className="muted small">
+            Match the code shown in the browser before approving.
+          </p>
+          <PairingApprovals />
+          {snapshot!.web.pending.length === 0 && (
+            <p className="muted">No browsers are waiting for approval.</p>
+          )}
+        </section>
+        <section className="settings-card full-width">
+          <h2>Paired browsers</h2>
+          {snapshot!.web.clients.length === 0 ? (
+            <p className="muted">
+              Open a web deck and choose Connect browser to create a QR code.
+            </p>
+          ) : (
+            snapshot!.web.clients.map((client) => (
+              <div className="device-row" key={client.id}>
+                <span
+                  className={`status-dot ${client.online ? "" : "unavailable"}`}
+                />
+                <div>
+                  <strong>{client.name}</strong>
+                  <small>
+                    {doc.decks.find((d) => d.id === client.deckId)?.name ??
+                      "Removed deck"}{" "}
+                    · {client.online ? "Connected" : "Offline"}
+                  </small>
+                </div>
+                <button
+                  onClick={() =>
+                    void request({ type: "revokeClient", clientId: client.id })
+                  }
+                >
+                  Revoke access
+                </button>
+              </div>
+            ))
+          )}
         </section>
       </div>
     </div>

@@ -74,7 +74,7 @@ it("backs up unsupported versions and rejects folder cycles and unknown active p
   doc.profiles[0].pages[0].parentId = "home";
   expect(() => validateDocument(doc)).toThrow("Folder cycle");
   delete doc.profiles[0].pages[0].parentId;
-  doc.activePageId = "missing";
+  doc.decks[0].activePageId = "missing";
   expect(() => validateDocument(doc)).toThrow("Active");
 });
 it("rejects image tampering and path traversal on import", async () => {

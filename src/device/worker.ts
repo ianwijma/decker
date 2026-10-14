@@ -13,52 +13,40 @@ import {
 } from "../shared/schema";
 import { Images, WriteQueue } from "./images";
 const port = process.parentPort!,
-  send = (data: unknown) => port.postMessage(data);
-const images = new Images();
-let page: Record<string, KeyBinding["appearance"]> = {},
-  brightness = 70,
-  simulator = true,
+  send = (data: unknown) => port.postMessage(data),
+  images = new Images();
+const frameSchema = z.object({
+  deckId: z.string(),
+  hardwareId: z.string(),
+  brightness: z.number().int().min(0).max(100),
+  page: z.record(z.string(), appearanceSchema),
+});
+type Frame = z.infer<typeof frameSchema>;
+let frames: Frame[] = [],
   assetDirectory = "",
   scanning = false,
-  stopping = false;
+  stopping = false,
+  foundDevices: DeviceStatus[] = [];
 const connections = new Map<
   string,
   {
     deck: StreamDeck;
     queue: WriteQueue;
-    status: DeviceStatus;
     path: string;
-    sent: Map<number, string>;
+    desired: Map<number, string>;
   }
 >();
-const report = () =>
-  send({
-    type: "devices",
-    devices: [
-      ...(simulator
-        ? [
-            {
-              id: "simulator-xl",
-              name: "Stream Deck XL · Simulator",
-              connected: true,
-              simulated: true,
-              rows: 4,
-              columns: 8,
-              iconSize: 96,
-            },
-          ]
-        : []),
-      ...[...connections.values()].map((c) => c.status),
-    ],
-  });
+const report = () => send({ type: "devices", devices: foundDevices });
 function draw(id: string) {
-  const connection = connections.get(id);
-  if (!connection) return;
+  const connection = connections.get(id),
+    frame = frames.find((f) => f.hardwareId === id);
+  if (!connection || !frame) return;
+  const brightness = frame.brightness;
   connection.queue.set(-1, () => connection.deck.setBrightness(brightness));
   for (const control of connection.deck.CONTROLS) {
     if (control.type !== "button" || control.feedbackType !== "lcd") continue;
     const key = control.index,
-      appearance = page[key] ?? {
+      appearance = frame.page[key] ?? {
         label: "",
         icon: "",
         background: "#111214",
@@ -67,21 +55,20 @@ function draw(id: string) {
         error: "#f23f42",
       },
       signature = JSON.stringify(appearance);
-    if (connection.sent.get(key) === signature) continue;
-    connection.sent.set(key, signature);
+    if (connection.desired.get(key) === signature) continue;
+    connection.desired.set(key, signature);
     connection.queue.set(key, async () => {
-      const asset =
-        appearance.asset && assetDirectory
-          ? await readFile(join(assetDirectory, appearance.asset)).catch(
-              () => undefined,
-            )
-          : undefined;
-      const buffer = await images.render(
+      const asset = appearance.asset
+        ? await readFile(join(assetDirectory, appearance.asset)).catch(
+            () => undefined,
+          )
+        : undefined;
+      const image = await images.render(
         appearance,
         control.pixelSize.width,
         asset,
       );
-      await connection.deck.fillKeyBuffer(key, buffer, { format: "rgb" });
+      await connection.deck.fillKeyBuffer(key, image, { format: "rgb" });
     });
   }
 }
@@ -95,9 +82,8 @@ async function disconnect(id: string, error?: unknown) {
   if (error)
     send({
       type: "diagnostic",
-      error: `${c.status.name}: ${String(error)}. Check USB connection and udev permissions.`,
+      error: `${id}: ${String(error)}. Check USB and udev permissions.`,
     });
-  report();
 }
 async function scan() {
   if (scanning || stopping) return;
@@ -105,43 +91,42 @@ async function scan() {
   try {
     const found = await listStreamDecks();
     send({ type: "nativeReady" });
-    for (const [id, c] of connections)
-      if (!found.some((d) => d.path === c.path)) await disconnect(id);
+    foundDevices = [];
     for (const info of found) {
       const id = info.serialNumber
-        ? `${info.model}:${info.serialNumber}`
-        : `session:${info.path}`;
-      if (connections.has(id)) continue;
+          ? `${info.model}:${info.serialNumber}`
+          : `session:${info.path}`,
+        controls = info.modelInfo.controls.filter((c) => c.type === "button"),
+        first = controls.find((c) => c.feedbackType === "lcd");
+      foundDevices.push({
+        id,
+        name: info.modelInfo.name,
+        connected: true,
+        simulated: false,
+        rows: Math.max(1, ...controls.map((c) => c.row + 1)),
+        columns: Math.max(1, ...controls.map((c) => c.column + 1)),
+        iconSize: first?.feedbackType === "lcd" ? first.pixelSize.width : 96,
+      });
+      if (!frames.some((f) => f.hardwareId === id) || connections.has(id))
+        continue;
       try {
         const deck = await openStreamDeck(info.path),
-          controls = deck.CONTROLS.filter((c) => c.type === "button"),
-          first = controls.find((c) => c.feedbackType === "lcd");
-        const status: DeviceStatus = {
-          id,
-          name: deck.PRODUCT_NAME,
-          connected: true,
-          simulated: false,
-          rows: Math.max(...controls.map((c) => c.row)) + 1,
-          columns: Math.max(...controls.map((c) => c.column)) + 1,
-          iconSize: first?.feedbackType === "lcd" ? first.pixelSize.width : 96,
-        };
-        const queue = new WriteQueue((error) => {
-          void disconnect(id, error);
-        });
+          queue = new WriteQueue((error) => {
+            void disconnect(id, error);
+          });
         connections.set(id, {
           deck,
           queue,
-          status,
           path: info.path,
-          sent: new Map(),
+          desired: new Map(),
         });
-        deck.on("down", (control) => {
-          if (control.type === "button")
-            send({ type: "key", id, key: control.index, down: true });
+        deck.on("down", (c) => {
+          if (c.type === "button")
+            send({ type: "key", id, key: c.index, down: true });
         });
-        deck.on("up", (control) => {
-          if (control.type === "button")
-            send({ type: "key", id, key: control.index, down: false });
+        deck.on("up", (c) => {
+          if (c.type === "button")
+            send({ type: "key", id, key: c.index, down: false });
         });
         deck.on("error", (error) => {
           void disconnect(id, error);
@@ -150,10 +135,16 @@ async function scan() {
       } catch (error) {
         send({
           type: "diagnostic",
-          error: `Cannot open ${info.modelInfo.name}: ${String(error)}. Install the documented udev rule and reconnect; do not run Decker as root.`,
+          error: `Cannot open ${info.modelInfo.name}: ${String(error)}. Check udev permissions; run without root.`,
         });
       }
     }
+    for (const [id, c] of connections)
+      if (
+        !found.some((d) => d.path === c.path) ||
+        !frames.some((f) => f.hardwareId === id)
+      )
+        await disconnect(id);
     report();
   } catch (error) {
     send({ type: "diagnostic", error: String(error) });
@@ -164,51 +155,28 @@ async function scan() {
 const schema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("configure"),
-    page: z.record(z.string(), appearanceSchema),
-    brightness: z.number().min(0).max(100),
-    simulator: z.boolean(),
+    frames: z.array(frameSchema).max(64),
     assetDirectory: z.string(),
-  }),
-  z.object({
-    type: z.literal("simulate"),
-    key: z.number().int().min(0).max(31),
-    down: z.boolean(),
   }),
   z.object({ type: z.literal("refresh") }),
   z.object({ type: z.literal("stop") }),
 ]);
 port.on("message", async (event) => {
   try {
-    const message = schema.parse(event.data);
-    switch (message.type) {
-      case "configure":
-        page = message.page;
-        brightness = message.brightness;
-        assetDirectory = message.assetDirectory;
-        if (simulator && !message.simulator)
-          send({ type: "disconnect", id: "simulator-xl" });
-        simulator = message.simulator;
-        for (const id of connections.keys()) draw(id);
-        report();
-        break;
-      case "simulate":
-        if (simulator)
-          send({
-            type: "key",
-            id: "simulator-xl",
-            key: message.key,
-            down: message.down,
-          });
-        break;
-      case "refresh":
-        for (const c of connections.values()) c.sent.clear();
-        for (const id of connections.keys()) draw(id);
-        void scan();
-        break;
-      case "stop":
-        stopping = true;
-        await Promise.all([...connections.keys()].map((id) => disconnect(id)));
-        process.exit(0);
+    const m = schema.parse(event.data);
+    if (m.type === "configure") {
+      frames = m.frames;
+      assetDirectory = m.assetDirectory;
+      for (const id of connections.keys()) draw(id);
+      void scan();
+    } else if (m.type === "refresh") {
+      for (const c of connections.values()) c.desired.clear();
+      for (const id of connections.keys()) draw(id);
+      void scan();
+    } else {
+      stopping = true;
+      await Promise.all([...connections.keys()].map((id) => disconnect(id)));
+      process.exit(0);
     }
   } catch (error) {
     send({ type: "diagnostic", error: String(error) });
