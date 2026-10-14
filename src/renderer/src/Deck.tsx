@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Copy,
   FolderPlus,
@@ -7,9 +7,13 @@ import {
   Trash2,
   ChevronRight,
   Layers,
+  Settings2,
+  Globe,
   ClipboardPaste,
 } from "lucide-react";
 import { useApp } from "./store";
+import { keySlot, visibleSlot } from "../../shared/decks";
+import { DeckOptions, WebConnect } from "./DeckManager";
 import { binding, uid } from "../../shared/defaults";
 import { observedAppearance } from "../../shared/feedback";
 import { actionById } from "../../shared/catalog";
@@ -21,12 +25,17 @@ export function Deck() {
     [selected, setSelected] = useState(0),
     [copied, setCopied] = useState<KeyBinding>(),
     [event, setEvent] = useState<"press" | "release" | "longPress">("press"),
-    [deviceId, setDeviceId] = useState("simulator-xl");
-  const profile = doc.profiles.find((p) => p.id === doc.activeProfileId)!,
-    page = profile.pages.find((p) => p.id === doc.activePageId)!,
-    key = page.keys[selected],
-    device =
-      snapshot!.devices.find((d) => d.id === deviceId) ?? snapshot!.devices[0];
+    [options, setOptions] = useState(false),
+    [connect, setConnect] = useState(false);
+  const deck = doc.decks.find((d) => d.id === doc.activeDeckId)!;
+  const profile = doc.profiles.find((p) => p.id === deck.activeProfileId)!,
+    page = profile.pages.find((p) => p.id === deck.activePageId)!;
+  const slot = keySlot(selected, deck.columns),
+    key = page.keys[slot];
+  const device = snapshot!.devices.find(
+    (d) => d.id === (deck.hardwareId ?? deck.id),
+  );
+  useEffect(() => setSelected(0), [deck.rows, deck.columns]);
   const keys = (fn: (keys: typeof page.keys) => void) =>
     edit((d) =>
       fn(
@@ -37,12 +46,13 @@ export function Deck() {
     );
   const update = (fn: (key: KeyBinding) => void) =>
     keys((all) => {
-      if (all[selected]) fn(all[selected]);
+      if (all[slot]) fn(all[slot]);
     });
   const assign = (type: string, index = selected) =>
     keys((all) => {
-      all[index] = binding(type, actionById(type)?.name);
-      all[index].appearance.icon = actionById(type)?.icon ?? "";
+      all[keySlot(index, deck.columns)] = binding(type, actionById(type)?.name);
+      all[keySlot(index, deck.columns)].appearance.icon =
+        actionById(type)?.icon ?? "";
     });
   const addPage = (folder: boolean) =>
     edit((d) => {
@@ -61,9 +71,9 @@ export function Deck() {
           kind: "action",
           action: { type: "deck.page", version: 1, config: { pageId: id } },
         };
-        p.pages.find((p) => p.id === page.id)!.keys[selected] = folderBinding;
+        p.pages.find((p) => p.id === page.id)!.keys[slot] = folderBinding;
       }
-      d.activePageId = id;
+      d.decks.find((deck) => deck.id === doc.activeDeckId)!.activePageId = id;
       setSelected(0);
     });
   const latest = key
@@ -97,31 +107,38 @@ export function Deck() {
                   name: `Profile ${d.profiles.length + 1}`,
                   pages: [{ id: pageId, name: "Home", keys: {} }],
                 });
-                d.activeProfileId = id;
-                d.activePageId = pageId;
+                const deck = d.decks.find(
+                  (deck) => deck.id === doc.activeDeckId,
+                )!;
+                deck.profileIds.push(id);
+                deck.activeProfileId = id;
+                deck.activePageId = pageId;
               })
             }
           >
             <Plus size={16} />
           </button>
         </div>
-        {doc.profiles.map((p) => (
-          <button
-            className={`profile-item ${profile.id === p.id ? "active" : ""}`}
-            key={p.id}
-            onClick={() =>
-              void request({
-                type: "navigate",
-                profileId: p.id,
-                pageId: p.pages[0].id,
-              })
-            }
-          >
-            <Layers size={17} />
-            {p.name}
-            <span>{p.pages.length}</span>
-          </button>
-        ))}
+        {doc.profiles
+          .filter((p) => deck.profileIds.includes(p.id))
+          .map((p) => (
+            <button
+              className={`profile-item ${profile.id === p.id ? "active" : ""}`}
+              key={p.id}
+              onClick={() =>
+                void request({
+                  type: "navigate",
+                  deckId: deck.id,
+                  profileId: p.id,
+                  pageId: p.pages[0].id,
+                })
+              }
+            >
+              <Layers size={17} />
+              {p.name}
+              <span>{p.pages.length}</span>
+            </button>
+          ))}
         <div className="sidebar-divider" />
         <Catalog onPick={assign} />
         <div className="sidebar-tip">
@@ -141,114 +158,110 @@ export function Deck() {
           </div>
           <span className="tag">
             <span className="status-dot" />
-            {device?.simulated
-              ? "Simulator mode"
-              : device?.connected
-                ? "Connected"
-                : "No device"}
+            {deck.kind === "web"
+              ? snapshot!.web.running
+                ? "Web deck ready"
+                : "Sharing paused"
+              : deck.kind === "simulator"
+                ? "Simulator mode"
+                : device?.connected
+                  ? "Connected"
+                  : "Disconnected"}
           </span>
         </div>
         <div className="deck-toolbar">
-          <label className="inline-label">
-            DEVICE
-            <select
-              aria-label="Device"
-              value={device?.id ?? ""}
-              onChange={(e) => setDeviceId(e.target.value)}
+          <span className="inline-label">
+            {deck.icon} <strong>{deck.name}</strong>
+          </span>
+          <button aria-label="Deck settings" onClick={() => setOptions(true)}>
+            <Settings2 size={15} />
+          </button>
+          {deck.kind === "web" && (
+            <button
+              onClick={() => setConnect(true)}
+              disabled={!snapshot!.web.running}
             >
-              {snapshot!.devices.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-              {!device && <option>No device connected</option>}
-            </select>
-          </label>
+              <Globe size={15} /> Connect browser
+            </button>
+          )}
           <div className="grow" />
           <span className="muted small">
-            {device?.columns ?? 8} × {device?.rows ?? 4} keys
+            {deck.columns} × {deck.rows} keys
           </span>
         </div>
         <div className="deck-device">
           <div className="deck-brand">
-            STREAM DECK <span>{device?.simulated ? "VIRTUAL XL" : ""}</span>
+            {deck.kind === "web" ? "WEB DECK" : "STREAM DECK"}{" "}
+            <span>{deck.kind === "simulator" ? "SIMULATOR" : ""}</span>
           </div>
           <div
             className="key-grid"
             style={{
-              gridTemplateColumns: `repeat(${device?.columns ?? 8},minmax(0,1fr))`,
+              gridTemplateColumns: `repeat(${deck.columns},minmax(0,1fr))`,
             }}
           >
-            {Array.from(
-              { length: (device?.rows ?? 4) * (device?.columns ?? 8) },
-              (_, index) => {
-                const original = page.keys[index];
-                const b = original
-                    ? {
-                        ...original,
-                        appearance: observedAppearance(
-                          original,
-                          snapshot!.observed,
-                          doc.settings.accent,
-                        ),
-                      }
-                    : undefined,
-                  run = b
-                    ? snapshot!.runs
-                        .filter(
-                          (r) =>
-                            r.bindingId === b.id &&
-                            r.generation === b.generation,
-                        )
-                        .at(-1)
-                    : undefined;
-                return (
-                  <button
-                    key={index}
-                    aria-label={`Key ${index + 1}${b ? `: ${b.appearance.label}` : ""}`}
-                    aria-pressed={selected === index}
-                    className={`deck-key ${selected === index ? "selected" : ""} ${run?.status === "running" ? "running" : ""}`}
-                    style={{ backgroundColor: b?.appearance.background }}
-                    onClick={() => setSelected(index)}
-                    onDoubleClick={() =>
-                      b && void request({ type: "test", binding: b })
+            {Array.from({ length: deck.rows * deck.columns }, (_, index) => {
+              const original = page.keys[keySlot(index, deck.columns)];
+              const b = original
+                  ? {
+                      ...original,
+                      appearance: observedAppearance(
+                        original,
+                        snapshot!.observed,
+                        doc.settings.accent,
+                      ),
                     }
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const type = e.dataTransfer.getData("decker/action");
-                      if (actionById(type)) {
-                        setSelected(index);
-                        assign(type, index);
-                      }
-                    }}
-                  >
-                    {b?.appearance.asset ? (
-                      <img
-                        alt=""
-                        src={`decker-asset://${b.appearance.asset}`}
-                      />
-                    ) : (
-                      <span className="key-symbol">
-                        {b?.appearance.icon ||
-                          (b?.press?.kind === "action"
-                            ? actionById(b.press.action.type)?.icon
-                            : b
-                              ? "⑂"
-                              : "+")}
-                      </span>
-                    )}
-                    <span className="key-label">
-                      {b?.appearance.label ?? ""}
+                  : undefined,
+                run = b
+                  ? snapshot!.runs
+                      .filter(
+                        (r) =>
+                          r.bindingId === b.id && r.generation === b.generation,
+                      )
+                      .at(-1)
+                  : undefined;
+              return (
+                <button
+                  key={index}
+                  aria-label={`Key ${index + 1}${b ? `: ${b.appearance.label}` : ""}`}
+                  aria-pressed={selected === index}
+                  className={`deck-key ${selected === index ? "selected" : ""} ${run?.status === "running" ? "running" : ""}`}
+                  style={{ backgroundColor: b?.appearance.background }}
+                  onClick={() => setSelected(index)}
+                  onDoubleClick={() =>
+                    b &&
+                    void request({ type: "test", deckId: deck.id, binding: b })
+                  }
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const type = e.dataTransfer.getData("decker/action");
+                    if (actionById(type)) {
+                      setSelected(index);
+                      assign(type, index);
+                    }
+                  }}
+                >
+                  {b?.appearance.asset ? (
+                    <img alt="" src={`decker-asset://${b.appearance.asset}`} />
+                  ) : (
+                    <span className="key-symbol">
+                      {b?.appearance.icon ||
+                        (b?.press?.kind === "action"
+                          ? actionById(b.press.action.type)?.icon
+                          : b
+                            ? "⑂"
+                            : "+")}
                     </span>
-                    <span className="key-index">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
-                    {run && <i className={`key-state ${run.status}`} />}
-                  </button>
-                );
-              },
-            )}
+                  )}
+                  <span className="key-label">{b?.appearance.label ?? ""}</span>
+                  <span className="key-index">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  {run && <i className={`key-state ${run.status}`} />}
+                </button>
+              );
+            })}
           </div>
           <div className="device-foot">
             <span />
@@ -268,6 +281,7 @@ export function Deck() {
                 onClick={() =>
                   void request({
                     type: "navigate",
+                    deckId: deck.id,
                     profileId: profile.id,
                     pageId: p.id,
                   })
@@ -334,19 +348,29 @@ export function Deck() {
                 edit((d) => {
                   const p = d.profiles.find((p) => p.id === profile.id)!;
                   p.pages = p.pages.filter((x) => x.id !== page.id);
-                  d.activePageId = p.pages[0].id;
+                  d.decks.find(
+                    (deck) => deck.id === doc.activeDeckId,
+                  )!.activePageId = p.pages[0].id;
                 })
               }
             >
               Delete page
             </button>
             <button
-              disabled={doc.profiles.length === 1}
+              disabled={deck.profileIds.length === 1}
               onClick={() =>
                 edit((d) => {
                   d.profiles = d.profiles.filter((p) => p.id !== profile.id);
-                  d.activeProfileId = d.profiles[0].id;
-                  d.activePageId = d.profiles[0].pages[0].id;
+                  const deck = d.decks.find(
+                    (deck) => deck.id === doc.activeDeckId,
+                  )!;
+                  deck.profileIds = deck.profileIds.filter(
+                    (id) => id !== profile.id,
+                  );
+                  deck.activeProfileId = deck.profileIds[0];
+                  deck.activePageId = d.profiles.find(
+                    (p) => p.id === deck.activeProfileId,
+                  )!.pages[0].id;
                 })
               }
             >
@@ -359,6 +383,14 @@ export function Deck() {
             Page ID: {page.id}
           </small>
         </details>
+        {Object.keys(page.keys).some(
+          (slot) => !visibleSlot(Number(slot), deck.rows, deck.columns),
+        ) && (
+          <p className="muted small">
+            This page has saved assignments outside the current grid. Expand the
+            layout in Deck settings to restore them.
+          </p>
+        )}
       </main>
       <aside className="inspector">
         <div className="inspector-title">
@@ -383,7 +415,7 @@ export function Deck() {
               disabled={!copied}
               onClick={() =>
                 keys((all) => {
-                  all[selected] = {
+                  all[slot] = {
                     ...structuredClone(copied!),
                     id: uid(),
                     generation: 0,
@@ -400,7 +432,7 @@ export function Deck() {
               disabled={!key}
               onClick={() =>
                 keys((all) => {
-                  delete all[selected];
+                  delete all[slot];
                 })
               }
             >
@@ -571,22 +603,39 @@ export function Deck() {
             </details>
             <button
               className="primary wide"
-              onClick={() => void request({ type: "test", binding: key })}
+              onClick={() =>
+                void request({ type: "test", deckId: deck.id, binding: key })
+              }
             >
               <Play size={16} /> Test action
             </button>
-            {device?.simulated && (
+            {deck.kind === "simulator" && (
               <button
                 className="wide"
                 onPointerDown={(e) => {
                   e.currentTarget.setPointerCapture(e.pointerId);
-                  void request({ type: "press", key: selected, down: true });
+                  void request({
+                    type: "press",
+                    deckId: deck.id,
+                    key: selected,
+                    down: true,
+                  });
                 }}
                 onPointerUp={() =>
-                  void request({ type: "press", key: selected, down: false })
+                  void request({
+                    type: "press",
+                    deckId: deck.id,
+                    key: selected,
+                    down: false,
+                  })
                 }
                 onPointerCancel={() =>
-                  void request({ type: "press", key: selected, down: false })
+                  void request({
+                    type: "press",
+                    deckId: deck.id,
+                    key: selected,
+                    down: false,
+                  })
                 }
               >
                 Hold simulated key
@@ -599,12 +648,13 @@ export function Deck() {
             <button
               className="wide"
               onClick={() => {
-                const empty = Array.from({ length: 32 }, (_, i) => i).find(
-                  (i) => !page.keys[i],
-                );
+                const empty = Array.from(
+                  { length: deck.rows * deck.columns },
+                  (_, i) => i,
+                ).find((i) => !page.keys[keySlot(i, deck.columns)]);
                 if (empty !== undefined)
                   keys((all) => {
-                    all[empty] = {
+                    all[keySlot(empty, deck.columns)] = {
                       ...structuredClone(key),
                       id: uid(),
                       generation: 0,
@@ -624,6 +674,8 @@ export function Deck() {
           </div>
         )}
       </aside>
+      {options && <DeckOptions deck={deck} onClose={() => setOptions(false)} />}
+      {connect && <WebConnect deck={deck} onClose={() => setConnect(false)} />}
     </div>
   );
 }

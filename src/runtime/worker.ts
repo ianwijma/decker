@@ -53,6 +53,7 @@ const main = async (
         runId: context.runId,
         bindingId: context.bindingId,
         generation: context.generation,
+        deckId: context.deckId,
       },
     });
   });
@@ -132,11 +133,14 @@ const schema = z.discriminatedUnion("type", [
     type: z.literal("trigger"),
     binding: bindingSchema,
     target: targetSchema,
+    deckId: z.string(),
+    phase: z.enum(["press", "release", "longPress"]).optional(),
   }),
   z.object({
     type: z.literal("run"),
     workflowId: z.string(),
     inputs: z.record(z.string(), z.unknown()),
+    deckId: z.string().optional(),
   }),
   z.object({ type: z.literal("cancel"), id: z.string() }),
   z.object({
@@ -193,10 +197,13 @@ port.on("message", async (event) => {
         if (activeRuns.size >= 64)
           throw new Error("Maximum active runs reached (64)");
         const f = targetWorkflow(message.target);
-        coordinator.trigger(message.binding, f, [
-          ...document.workflows,
-          ...(f.id === "direct" ? [f] : []),
-        ]);
+        coordinator.trigger(
+          message.binding,
+          f,
+          [...document.workflows, ...(f.id === "direct" ? [f] : [])],
+          message.deckId,
+          message.phase,
+        );
         break;
       }
       case "run": {
@@ -208,6 +215,7 @@ port.on("message", async (event) => {
           f,
           document.workflows,
           message.inputs as Record<string, Json>,
+          message.deckId ? { deckId: message.deckId } : undefined,
         );
         standalone.set(h.record.id, h);
         void h.done.finally(() => standalone.delete(h.record.id));

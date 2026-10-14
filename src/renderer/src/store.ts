@@ -4,7 +4,9 @@ type State = {
   snapshot?: Snapshot;
   error?: string;
   saving: boolean;
-  tab: "deck" | "flows" | "runs" | "settings";
+  tab: "deck" | "flows" | "settings";
+  settingsSection: "general" | "web" | "diagnostics" | "runs";
+  setSettingsSection: (section: State["settingsSection"]) => void;
   setTab: (tab: State["tab"]) => void;
   setError: (error?: string) => void;
   receive: (snapshot: Snapshot) => void;
@@ -17,6 +19,8 @@ let pending = Promise.resolve(),
 export const useApp = create<State>((set, get) => ({
   saving: false,
   tab: "deck",
+  settingsSection: "general",
+  setSettingsSection: (settingsSection) => set({ settingsSection }),
   setTab: (tab) => set({ tab }),
   setError: (error) => set({ error }),
   receive: (snapshot) =>
@@ -31,6 +35,16 @@ export const useApp = create<State>((set, get) => ({
     if (!snapshot) return;
     const document = structuredClone(snapshot.document);
     fn(document);
+    const navigationEdits = document.decks
+      .filter((deck) => {
+        const previous = snapshot.document.decks.find((d) => d.id === deck.id);
+        return (
+          !previous ||
+          previous.activeProfileId !== deck.activeProfileId ||
+          previous.activePageId !== deck.activePageId
+        );
+      })
+      .map((d) => d.id);
     const editVersion = ++version;
     saves++;
     set({ snapshot: { ...snapshot, document }, saving: true });
@@ -41,6 +55,7 @@ export const useApp = create<State>((set, get) => ({
           const saved = (await window.decker.request({
             type: "save",
             document,
+            navigationEdits,
           })) as Snapshot;
           if (version === editVersion) set({ snapshot: saved });
         } catch (error) {

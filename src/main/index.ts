@@ -18,16 +18,26 @@ import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import sharp from "sharp";
+import { createHash } from "node:crypto";
+import {
+  deckPage,
+  navigateDeck,
+  cloneProfiles,
+  keySlot,
+  preserveNavigation,
+} from "../shared/decks";
 import { z } from "zod";
 import { Persistence, validateDocument, validateImport } from "./persistence";
 import { Credentials } from "./credentials";
-import { defaults } from "../shared/defaults";
+import { defaults, uid } from "../shared/defaults";
 import {
   requestSchema,
   type AppDocument,
   type Json,
   type RunRecord,
   type Snapshot,
+  type WebStatus,
+  type WebDeckView,
 } from "../shared/schema";
 import { Triggers } from "../device/triggers";
 import { observedAppearance } from "../shared/feedback";
@@ -50,6 +60,22 @@ let document: AppDocument = defaults(),
   devices: Snapshot["devices"] = [],
   capabilities: Snapshot["capabilities"] = [],
   observed: Snapshot["observed"] = {};
+let webStatus: WebStatus = {
+  running: false,
+  port: 0,
+  urls: [],
+  clients: [],
+  pending: [],
+};
+let lastWebConfigure = "";
+const webReplies = new Map<
+  string,
+  {
+    resolve: (value: unknown) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }
+>();
 const workers = new Map<
   string,
   { process: UtilityProcess; ready: boolean; failures: number }
@@ -59,7 +85,21 @@ let publishTimer: ReturnType<typeof setTimeout> | undefined,
 const snapshot = (): Snapshot => ({
   document,
   runs,
-  devices,
+  devices: [
+    ...devices,
+    ...document.decks
+      .filter((d) => d.kind === "simulator")
+      .map((d) => ({
+        id: d.id,
+        name: d.name,
+        connected: true,
+        simulated: true,
+        rows: d.rows,
+        columns: d.columns,
+        iconSize: 96,
+      })),
+  ],
+  web: webStatus,
   capabilities,
   observed,
   secureStorage: credentials.secure,
@@ -68,6 +108,7 @@ function publish() {
   if (publishTimer) return;
   publishTimer = setTimeout(() => {
     publishTimer = undefined;
+    configureWeb();
     if (window && !window.isDestroyed())
       window.webContents.send("decker:snapshot", snapshot());
   }, 40);
@@ -101,10 +142,115 @@ function post(name: string, message: unknown) {
   )
     throw new Error(`${name} is starting; try again in a moment`);
 }
-function page() {
-  return document.profiles
-    .find((p) => p.id === document.activeProfileId)!
-    .pages.find((p) => p.id === document.activePageId)!;
+function page(deckId: string) {
+  const result = deckPage(document, deckId);
+  if (!result) throw new Error("Deck page unavailable");
+  return result;
+}
+function deckAppearance(deckId: string) {
+  const deck = document.decks.find((d) => d.id === deckId)!;
+  const keys: Record<string, import("../shared/schema").WebKey> = {};
+  const source = page(deckId);
+  for (let i = 0; i < deck.rows * deck.columns; i++) {
+    const binding = source.keys[keySlot(i, deck.columns)];
+    if (!binding) continue;
+    const appearance = observedAppearance(
+        binding,
+        observed,
+        document.settings.accent,
+      ),
+      state = feedback.get(binding.id);
+    if (state?.generation === binding.generation) {
+      if (["running", "success", "failure"].includes(state.state))
+        appearance.background =
+          state.state === "running"
+            ? document.settings.accent
+            : state.state === "success"
+              ? appearance.success
+              : appearance.error;
+      if (state.label) appearance.label = state.label;
+      if (state.background) appearance.background = state.background;
+    }
+    keys[i] = {
+      label: appearance.label,
+      icon: appearance.icon,
+      background: appearance.background,
+      asset: appearance.asset,
+    };
+  }
+  return keys;
+}
+function configureWeb() {
+  if (!store) return;
+  const views: WebDeckView[] = document.decks
+    .filter((d) => d.kind === "web")
+    .map((deck) => ({
+      id: deck.id,
+      name: deck.name,
+      rows: deck.rows,
+      columns: deck.columns,
+      pageName: page(deck.id).name,
+      accent: document.settings.accent,
+      version: createHash("sha256")
+        .update(
+          JSON.stringify([
+            deck.activeProfileId,
+            deck.activePageId,
+            deck.rows,
+            deck.columns,
+            Object.entries(page(deck.id).keys).map(([slot, key]) => [
+              slot,
+              key.id,
+              key.generation,
+            ]),
+          ]),
+        )
+        .digest("hex"),
+      keys: deckAppearance(deck.id),
+    }));
+  const message = {
+    type: "configure",
+    views,
+    enabled: document.settings.webEnabled,
+    port: document.settings.webPort,
+    rendererDirectory: join(import.meta.dirname, "../renderer"),
+    assetDirectory: store.assetDirectory,
+    directory: store.directory,
+  };
+  const signature = JSON.stringify(message);
+  if (signature !== lastWebConfigure && workers.get("web")?.ready) {
+    lastWebConfigure = signature;
+    post("web", message);
+  }
+}
+function webRequest(type: string, payload: Record<string, unknown>) {
+  return new Promise<unknown>((resolve, reject) => {
+    const id = uid(),
+      timer = setTimeout(() => {
+        webReplies.delete(id);
+        reject(new Error("Web deck service timed out"));
+      }, 10000);
+    webReplies.set(id, { resolve, reject, timer });
+    try {
+      post("web", { type, id, ...payload });
+    } catch (error) {
+      clearTimeout(timer);
+      webReplies.delete(id);
+      reject(error);
+    }
+  });
+}
+function input(deckId: string, source: string, key: number, down: boolean) {
+  const deck = document.decks.find((d) => d.id === deckId);
+  if (!deck || key < 0 || key >= deck.rows * deck.columns) return;
+  if (down)
+    triggers.down(
+      source,
+      key,
+      page(deckId).keys[keySlot(key, deck.columns)],
+      deckId,
+    );
+  else triggers.up(source, key);
 }
 const feedback = new Map<
   string,
@@ -117,35 +263,29 @@ const feedback = new Map<
   }
 >();
 function configureDevice() {
-  const keys = Object.fromEntries(
-    Object.entries(page().keys).map(([index, binding]) => {
-      const status = feedback.get(binding.id),
-        appearance = observedAppearance(
-          binding,
-          observed,
-          document.settings.accent,
-        );
-      if (status?.generation === binding.generation) {
-        if (["running", "success", "failure"].includes(status.state))
-          appearance.background =
-            status.state === "failure"
-              ? appearance.error
-              : status.state === "running"
-                ? document.settings.accent
-                : appearance.success;
-        if (status.label) appearance.label = status.label;
-        if (status.background) appearance.background = status.background;
-      }
-      return [index, appearance];
-    }),
-  );
   post("device", {
     type: "configure",
-    page: keys,
-    brightness: document.settings.brightness,
-    simulator: document.settings.simulator,
+    frames: document.decks
+      .filter((d) => d.kind === "hardware")
+      .map((deck) => ({
+        deckId: deck.id,
+        hardwareId: deck.hardwareId,
+        brightness: deck.brightness,
+        page: Object.fromEntries(
+          Object.entries(deckAppearance(deck.id)).map(([key, appearance]) => [
+            key,
+            {
+              ...appearance,
+              running: document.settings.accent,
+              success: "#23a559",
+              error: "#f23f42",
+            },
+          ]),
+        ),
+      })),
     assetDirectory: store.assetDirectory,
   });
+  configureWeb();
 }
 function configure() {
   post("runner", {
@@ -156,26 +296,33 @@ function configure() {
   configureDevice();
   publish();
 }
-const triggers = new Triggers((binding, target) => {
+const triggers = new Triggers((binding, target, deckId, phase) => {
   try {
-    post("runner", { type: "trigger", binding, target });
+    post("runner", { type: "trigger", binding, target, deckId, phase });
   } catch (error) {
     diagnostic(error);
   }
 });
-function navigate(profileId: string, pageId: string) {
-  const profile = document.profiles.find((p) => p.id === profileId);
-  if (!profile?.pages.some((p) => p.id === pageId))
-    throw new Error("Profile or page does not exist");
-  document = { ...document, activeProfileId: profileId, activePageId: pageId };
+function navigate(deckId: string, profileId: string, pageId: string) {
+  navigateDeck(document, deckId, profileId, pageId);
   configure();
   persist();
 }
 async function mainAction(
   action: string,
   c: Record<string, Json>,
-  context: { runId: string; bindingId?: string; generation?: number },
+  context: {
+    runId: string;
+    bindingId?: string;
+    generation?: number;
+    deckId?: string;
+  },
 ): Promise<Json> {
+  const deck = document.decks.find(
+    (d) => d.id === (context.deckId ?? document.activeDeckId),
+  );
+  if (action.startsWith("deck.") && !deck)
+    throw new Error("No originating deck selected");
   switch (action) {
     case "desktop.open": {
       const target = String(c.target);
@@ -199,27 +346,30 @@ async function mainAction(
       new Notification({ title: String(c.title), body: String(c.body) }).show();
       return null;
     case "deck.page":
-      navigate(document.activeProfileId, String(c.pageId));
+      navigate(deck!.id, deck!.activeProfileId, String(c.pageId));
       return null;
     case "deck.profile": {
-      const p = document.profiles.find((p) => p.id === c.profileId);
+      const p = document.profiles.find(
+        (p) => p.id === c.profileId && deck!.profileIds.includes(p.id),
+      );
       if (!p) throw new Error("Profile does not exist");
-      navigate(p.id, p.pages[0].id);
+      navigate(deck!.id, p.id, p.pages[0].id);
       return null;
     }
     case "deck.back":
-      if (page().parentId) navigate(document.activeProfileId, page().parentId!);
+      if (page(deck!.id).parentId)
+        navigate(deck!.id, deck!.activeProfileId, page(deck!.id).parentId!);
       return null;
     case "deck.brightness": {
       const value = z.number().int().min(0).max(100).parse(c.value);
-      document.settings.brightness = value;
+      deck!.brightness = value;
       configureDevice();
       publish();
       persist();
       return value;
     }
     case "deck.appearance": {
-      const binding = Object.values(page().keys).find(
+      const binding = Object.values(page(deck!.id).keys).find(
         (b) =>
           b.id === context.bindingId && b.generation === context.generation,
       );
@@ -243,7 +393,7 @@ async function mainAction(
       throw new Error(`Unknown main action: ${action}`);
   }
 }
-function startWorker(name: "runner" | "device", failures = 0) {
+function startWorker(name: "runner" | "device" | "web", failures = 0) {
   const child = utilityProcess.fork(
     join(import.meta.dirname, `${name}.js`),
     [],
@@ -255,7 +405,30 @@ function startWorker(name: "runner" | "device", failures = 0) {
       if (message.type === "ready") {
         const worker = workers.get(name);
         if (worker) worker.ready = true;
+        if (name === "web") lastWebConfigure = "";
         configure();
+        return;
+      }
+      if (name === "web") {
+        if (message.type === "status") {
+          webStatus = message.status;
+          publish();
+        } else if (message.type === "input")
+          input(message.deckId, message.source, message.key, message.down);
+        else if (message.type === "disconnect")
+          triggers.disconnect(message.source);
+        else if (message.type === "reply") {
+          const pending = webReplies.get(message.id);
+          if (pending) {
+            clearTimeout(pending.timer);
+            webReplies.delete(message.id);
+            if (message.error) pending.reject(new Error(message.error));
+            else pending.resolve(message.value);
+          }
+        } else if (message.type === "error") {
+          webStatus = { ...webStatus, error: message.error };
+          diagnostic(message.error);
+        }
         return;
       }
       if (name === "device") {
@@ -264,11 +437,24 @@ function startWorker(name: "runner" | "device", failures = 0) {
           publish();
         } else if (message.type === "devices") {
           devices = message.devices;
+          for (const deck of document.decks.filter(
+            (d) => d.kind === "hardware",
+          )) {
+            const found = devices.find((d) => d.id === deck.hardwareId);
+            if (
+              found &&
+              (deck.rows !== found.rows || deck.columns !== found.columns)
+            ) {
+              deck.rows = found.rows;
+              deck.columns = found.columns;
+              persist();
+              configureDevice();
+            }
+          }
           publish();
         } else if (message.type === "key") {
-          if (message.down)
-            triggers.down(message.id, message.key, page().keys[message.key]);
-          else triggers.up(message.id, message.key);
+          const deck = document.decks.find((d) => d.hardwareId === message.id);
+          if (deck) input(deck.id, message.id, message.key, message.down);
         } else if (message.type === "disconnect")
           triggers.disconnect(message.id);
         else if (message.type === "diagnostic") diagnostic(message.error);
@@ -387,9 +573,9 @@ function startWorker(name: "runner" | "device", failures = 0) {
     workers.delete(name);
     if (quitting) return;
     if (name === "device") {
-      triggers.disconnect();
+      for (const device of devices) triggers.disconnect(device.id);
       devices = [];
-    } else {
+    } else if (name === "runner") {
       runs = runs.map((r) =>
         r.status === "running"
           ? {
@@ -402,6 +588,21 @@ function startWorker(name: "runner" | "device", failures = 0) {
           : r,
       );
       persist();
+    }
+    if (name === "web") {
+      triggers.disconnect("web");
+      lastWebConfigure = "";
+      webStatus = {
+        ...webStatus,
+        running: false,
+        pending: [],
+        clients: webStatus.clients.map((c) => ({ ...c, online: false })),
+      };
+      for (const pending of webReplies.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("Web service restarted"));
+      }
+      webReplies.clear();
     }
     diagnostic(
       `${name} exited (${code}); ${failures < 3 ? "restarting" : "restart the application to retry"}`,
@@ -432,7 +633,9 @@ async function handle(raw: unknown) {
   const request = requestSchema.parse(raw);
   switch (request.type) {
     case "save": {
-      const next = validateDocument(request.document);
+      const next = request.document;
+      preserveNavigation(document, next, request.navigationEdits);
+      validateDocument(next);
       for (const f of next.workflows) {
         const old = document.workflows.find((w) => w.id === f.id);
         if (old) {
@@ -462,35 +665,149 @@ async function handle(raw: unknown) {
           }
       if (next.settings.launchAtLogin !== document.settings.launchAtLogin)
         await startup(next.settings.launchAtLogin);
+      for (const old of document.decks) {
+        const changed = next.decks.find((d) => d.id === old.id);
+        if (
+          !changed ||
+          changed.rows !== old.rows ||
+          changed.columns !== old.columns
+        )
+          triggers.disconnectDeck(old.id);
+      }
       document = next;
       await store.save(document, runs);
       configure();
       return snapshot();
     }
-    case "press":
-      post("device", {
-        type: "simulate",
-        key: request.key,
-        down: request.down,
-      });
+    case "press": {
+      const deck = document.decks.find((d) => d.id === request.deckId);
+      if (deck?.kind !== "simulator")
+        throw new Error("Simulated input requires a simulator deck");
+      input(deck.id, deck.id, request.key, request.down);
       return null;
-    case "test":
+    }
+    case "test": {
+      const deck = document.decks.find((d) => d.id === request.deckId);
+      if (!deck) throw new Error("Deck not found");
       if (request.binding.press)
         post("runner", {
           type: "trigger",
           binding: request.binding,
           target: request.binding.press,
+          deckId: deck.id,
         });
       return null;
+    }
     case "run":
-      post("runner", request);
+      post("runner", {
+        ...request,
+        deckId: request.deckId ?? (document.activeDeckId || undefined),
+      });
       return null;
     case "cancel":
       post("runner", { type: "cancel", id: request.runId });
       return null;
     case "navigate":
-      navigate(request.profileId, request.pageId);
+      navigate(request.deckId, request.profileId, request.pageId);
       return snapshot();
+    case "selectDeck":
+      if (!document.decks.some((d) => d.id === request.deckId))
+        throw new Error("Deck not found");
+      document.activeDeckId = request.deckId;
+      persist();
+      publish();
+      return snapshot();
+    case "addDeck": {
+      if (document.decks.length >= 64 || document.profiles.length >= 200)
+        throw new Error("Deck or profile limit reached");
+      let rows = request.rows,
+        columns = request.columns;
+      if (request.kind === "hardware") {
+        const found = devices.find((d) => d.id === request.hardwareId);
+        if (!found || found.id.startsWith("session:"))
+          throw new Error(
+            "Hardware needs a stable serial number and must be connected",
+          );
+        if (document.decks.some((d) => d.hardwareId === found.id))
+          throw new Error("This Stream Deck is already configured");
+        rows = found.rows;
+        columns = found.columns;
+      }
+      const id = uid(),
+        profileId = uid(),
+        pageId = uid();
+      document.decks.push({
+        id,
+        name: request.name,
+        kind: request.kind,
+        icon: request.icon,
+        rows,
+        columns,
+        brightness: 70,
+        hardwareId:
+          request.kind === "hardware" ? request.hardwareId : undefined,
+        profileIds: [profileId],
+        activeProfileId: profileId,
+        activePageId: pageId,
+      });
+      document.profiles.push({
+        id: profileId,
+        name: "Default",
+        pages: [{ id: pageId, name: "Home", keys: {} }],
+      });
+      document.activeDeckId = id;
+      if (request.kind === "web") document.settings.webEnabled = true;
+      await store.save(document, runs);
+      configure();
+      return snapshot();
+    }
+    case "deleteDeck": {
+      const deck = document.decks.find((d) => d.id === request.deckId);
+      if (!deck) throw new Error("Deck not found");
+      triggers.disconnectDeck(deck.id);
+      document.decks = document.decks.filter((d) => d.id !== deck.id);
+      document.profiles = document.profiles.filter(
+        (p) => !deck.profileIds.includes(p.id),
+      );
+      if (document.activeDeckId === deck.id)
+        document.activeDeckId = document.decks[0]?.id ?? "";
+      await store.save(document, runs);
+      configure();
+      return snapshot();
+    }
+    case "copyProfile": {
+      const deck = document.decks.find((d) => d.id === request.toDeckId),
+        profile = document.profiles.find((p) => p.id === request.fromProfileId);
+      if (!deck || !profile) throw new Error("Deck or profile not found");
+      const copy = cloneProfiles([profile]).profiles[0];
+      copy.name += " copy";
+      document.profiles.push(copy);
+      deck.profileIds.push(copy.id);
+      await store.save(document, runs);
+      configure();
+      return snapshot();
+    }
+    case "invite":
+      return webRequest("invite", { deckId: request.deckId });
+    case "approvePairing":
+      return webRequest("approve", {
+        pairingId: request.pairingId,
+        approved: request.approved,
+      });
+    case "revokeClient":
+      return webRequest("revoke", { clientId: request.clientId });
+    case "copyWebLink":
+    case "openWeb": {
+      const url = new URL(request.url);
+      if (
+        !webStatus.urls.some((base) => url.origin === base) ||
+        !url.pathname.startsWith("/deck/")
+      )
+        throw new Error("Only this computer’s web deck URLs can be opened");
+      if (request.type === "copyWebLink") clipboard.writeText(request.url);
+      else await shell.openExternal(request.url);
+      return null;
+    }
     case "diagnose":
       post("runner", { type: "diagnose" });
       post("device", { type: "refresh" });
@@ -582,6 +899,9 @@ async function handle(raw: unknown) {
         ({ credentialRef: _ref, ...c }) => c,
       );
       next.settings.launchAtLogin = document.settings.launchAtLogin;
+      post("web", { type: "resetPairings" });
+      lastWebConfigure = "";
+      next.settings.webEnabled = false;
       document = next;
       feedback.clear();
       await store.save(document, runs);
@@ -694,6 +1014,7 @@ if (locked)
     createWindow();
     startWorker("runner");
     startWorker("device");
+    startWorker("web");
     powerMonitor.on("suspend", () => triggers.disconnect());
     powerMonitor.on("resume", () => {
       triggers.disconnect();

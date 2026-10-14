@@ -27,13 +27,23 @@ describe("simulated deck", () => {
     vi.advanceTimersByTime(200);
     expect(fire).not.toHaveBeenCalled();
     triggers.up("xl", 0);
-    expect(fire).toHaveBeenCalledWith(expect.anything(), b.press);
+    expect(fire).toHaveBeenCalledWith(
+      expect.anything(),
+      b.press,
+      "xl",
+      "press",
+    );
     fire.mockClear();
     triggers.down("xl", 0, b);
     vi.advanceTimersByTime(700);
     triggers.up("xl", 0);
     expect(fire).toHaveBeenCalledTimes(1);
-    expect(fire).toHaveBeenCalledWith(expect.anything(), b.longPress);
+    expect(fire).toHaveBeenCalledWith(
+      expect.anything(),
+      b.longPress,
+      "xl",
+      "longPress",
+    );
   });
   it("clears held buttons on disconnect and never replays release", () => {
     vi.useFakeTimers();

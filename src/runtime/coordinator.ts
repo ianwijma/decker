@@ -8,8 +8,10 @@ export class Coordinator {
     binding: KeyBinding,
     workflow: WorkflowDefinition,
     all: WorkflowDefinition[],
+    deckId?: string,
+    phase = "press",
   ): void {
-    const key = binding.id,
+    const key = `${binding.id}:${phase}`,
       active = this.active.get(key) ?? new Set<RunHandle>();
     this.active.set(key, active);
     const launch = () => {
@@ -17,7 +19,7 @@ export class Coordinator {
         workflow,
         all,
         {},
-        { bindingId: binding.id, generation: binding.generation },
+        { bindingId: binding.id, generation: binding.generation, deckId },
       );
       active.add(handle);
       void handle.done.finally(() => {
