@@ -169,7 +169,9 @@ it("canvas selectors ignore device/observed clones while delivering workflow and
     secureStorage: false,
     web: { running: false, port: 9018, urls: [], clients: [], pending: [] },
   };
-  const selectRun = createLatestFlowRunSelector("welcome");
+  const selectRun = createLatestFlowRunSelector(
+    snapshot.document.workflows[0].id,
+  );
   const workflows = selectFlowWorkflows({ snapshot }),
     runs = selectRun({ snapshot });
   const incoming = structuredClone(snapshot);
@@ -182,7 +184,7 @@ it("canvas selectors ignore device/observed clones while delivering workflow and
   );
   incoming.runs.push({
     id: "run",
-    workflowId: "welcome",
+    workflowId: snapshot.document.workflows[0].id,
     workflowName: "Welcome",
     revision: 1,
     startedAt: 1,

@@ -1,10 +1,12 @@
 import { uid } from "./defaults";
 import {
   documentSchema,
+  v2DocumentSchema,
   legacyDocumentSchema,
   type AppDocument,
   type DeckConfig,
 } from "./schema";
+import { migrateWorkflowIdentities } from "./workflow-identity";
 export function deckPage(document: AppDocument, deckId: string) {
   const deck = document.decks.find((d) => d.id === deckId);
   return (
@@ -67,8 +69,19 @@ export function cloneProfiles(profiles: AppDocument["profiles"]) {
   return { profiles: cloned, ids };
 }
 export function migrateDocument(value: unknown): AppDocument {
-  if ((value as { schemaVersion?: number })?.schemaVersion === 2)
-    return documentSchema.parse(value);
+  const version = (value as { schemaVersion?: number })?.schemaVersion;
+  if (version === 3) return documentSchema.parse(value);
+  if (
+    value &&
+    typeof value === "object" &&
+    Object.hasOwn(value, "workflowAliases")
+  )
+    throw new Error("Workflow aliases require schema version 3");
+  if (version === 2)
+    return documentSchema.parse(
+      migrateWorkflowIdentities(v2DocumentSchema.parse(value)),
+    );
+  if (version !== 1) throw new Error(`Unsupported schema version ${version}`);
   const old = legacyDocumentSchema.parse(value),
     decks: DeckConfig[] = [],
     profiles: AppDocument["profiles"] = [];
@@ -134,14 +147,18 @@ export function migrateDocument(value: unknown): AppDocument {
     simulator: _simulator,
     ...settings
   } = old.settings;
-  return documentSchema.parse({
-    ...old,
-    schemaVersion: 2,
-    profiles,
-    decks,
-    activeDeckId: decks[0].id,
-    settings: { ...settings, webEnabled: false, webPort: 9018 },
-  });
+  return documentSchema.parse(
+    migrateWorkflowIdentities(
+      v2DocumentSchema.parse({
+        ...old,
+        schemaVersion: 2,
+        profiles,
+        decks,
+        activeDeckId: decks[0].id,
+        settings: { ...settings, webEnabled: false, webPort: 9018 },
+      }),
+    ),
+  );
 }
 
 // Storage uses fixed 16-column coordinates so resizing never moves/deletes existing keys.

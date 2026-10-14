@@ -1,3 +1,9 @@
+import {
+  findWorkflow,
+  resolveWorkflowId,
+  type WorkflowAliases,
+} from "../shared/workflow-identity";
+import { actionById } from "../shared/catalog";
 import { createActor, fromPromise } from "xstate";
 import { setTimeout as sleep } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
@@ -35,6 +41,7 @@ export class Engine {
     private handler: Handler,
     private emit: (record: RunRecord) => void,
     private secrets: () => string[] = () => [],
+    private workflowAliases: () => WorkflowAliases = () => ({}),
   ) {}
   start(
     definition: WorkflowDefinition,
@@ -44,7 +51,8 @@ export class Engine {
   ): RunHandle {
     const workflow = structuredClone(definition),
       all = structuredClone(definitions),
-      issues = validateWorkflow(workflow, all);
+      aliases = structuredClone(this.workflowAliases()),
+      issues = validateWorkflow(workflow, all, aliases);
     if (issues.length) throw new Error(issues.join("\n"));
     for (const input of workflow.inputs)
       if (!Object.hasOwn(inputs, input))
@@ -112,9 +120,14 @@ export class Engine {
             const child = async (
               id: string,
               childInputs: Record<string, Json>,
+              revision?: Json,
             ): Promise<Json> => {
-              const f = all.find((f) => f.id === id);
+              const f = findWorkflow(all, id, aliases);
               if (!f) throw new Error(`Missing subflow: ${id}`);
+              if (revision !== undefined && revision !== f.revision)
+                throw new Error(
+                  `Pin the current subflow revision (${f.revision})`,
+                );
               for (const key of f.inputs)
                 if (!Object.hasOwn(childInputs, key))
                   throw new Error(`Missing subflow input: ${key}`);
@@ -149,6 +162,16 @@ export class Engine {
                     Json
                   >,
                 };
+                for (const field of actionById(action.type)?.fields ?? [])
+                  if (field.type === "workflow") {
+                    const ref = action.config[field.key];
+                    if (
+                      typeof ref !== "string" ||
+                      !findWorkflow(all, ref, aliases)
+                    )
+                      throw new Error("Workflow not found");
+                    action.config[field.key] = resolveWorkflowId(ref, aliases);
+                  }
                 output =
                   action.type === "workflow.run"
                     ? await child(
@@ -192,9 +215,12 @@ export class Engine {
                 output = c;
                 break;
               case "subflow":
+                if (!Number.isInteger(c.revision) || Number(c.revision) < 1)
+                  throw new Error("Pin a subflow revision");
                 output = await child(
                   String(c.workflowId),
                   (c.inputs ?? {}) as Record<string, Json>,
+                  c.revision,
                 );
                 break;
               case "parallel": {

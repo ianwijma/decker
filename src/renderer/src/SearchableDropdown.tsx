@@ -14,12 +14,18 @@ export function SearchableDropdown({
   options,
   value,
   onSelect,
+  hideIds = false,
+  missingLabel = "Selection unavailable",
+  emptyLabel = "None selected",
 }: {
   label: string;
   searchLabel: string;
   options: SearchableOption[];
   value?: string;
   onSelect: (id: string) => void;
+  hideIds?: boolean;
+  missingLabel?: string;
+  emptyLabel?: string;
 }) {
   const id = useId(),
     root = useRef<HTMLDivElement>(null),
@@ -30,6 +36,7 @@ export function SearchableDropdown({
     [query, setQuery] = useState(""),
     [activeId, setActiveId] = useState(value);
   const selected = options.find((option) => option.id === value);
+  const selectedName = selected?.name ?? (value ? missingLabel : emptyLabel);
   const filtered = options.filter((option) =>
     option.name.toLowerCase().includes(query.trim().toLowerCase()),
   );
@@ -41,6 +48,13 @@ export function SearchableDropdown({
     );
   for (const option of options)
     names.set(option.name, (names.get(option.name) ?? 0) + 1);
+  const ordinals = new Map<string, number>(),
+    counts = new Map<string, number>();
+  for (const option of options) {
+    const count = (counts.get(option.name) ?? 0) + 1;
+    counts.set(option.name, count);
+    ordinals.set(option.id, count);
+  }
   const rowId = (option: SearchableOption) => optionIds.get(option.id);
   const close = (returnFocus = false) => {
     setOpen(false);
@@ -81,7 +95,7 @@ export function SearchableDropdown({
         ref={trigger}
         type="button"
         className="searchable-dropdown-trigger"
-        aria-label={`${label}: ${selected?.name ?? "None selected"}`}
+        aria-label={`${label}: ${selectedName}`}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? `${id}-list` : undefined}
@@ -93,7 +107,7 @@ export function SearchableDropdown({
           }
         }}
       >
-        <span>{selected?.name ?? "None selected"}</span>
+        <span>{selectedName}</span>
         <ChevronDown size={16} aria-hidden="true" />
       </button>
       {open && (
@@ -151,13 +165,22 @@ export function SearchableDropdown({
                 aria-selected={option.id === value}
                 className={`searchable-dropdown-option ${option.id === active?.id ? "highlighted" : ""}`}
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={() => choose(option)}
+                onClick={(event) => {
+                  // A dropdown can live inside a field label. Prevent the
+                  // label's synthetic trigger click from reopening it.
+                  event.preventDefault();
+                  choose(option);
+                }}
                 onMouseMove={() => setActiveId(option.id)}
               >
                 <span>{option.name}</span>
                 {option.description && <small>{option.description}</small>}
                 {(names.get(option.name) ?? 0) > 1 && (
-                  <small>ID: {option.id}</small>
+                  <small>
+                    {hideIds
+                      ? `Choice ${ordinals.get(option.id)}`
+                      : `ID: ${option.id}`}
+                  </small>
                 )}
               </div>
             ))}

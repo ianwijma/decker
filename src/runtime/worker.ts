@@ -1,3 +1,4 @@
+import { findWorkflow, resolveWorkflowId } from "../shared/workflow-identity";
 import { z } from "zod";
 import { Engine, type ActionContext, type RunHandle } from "./engine";
 import { Coordinator } from "./coordinator";
@@ -73,9 +74,13 @@ const engine = new Engine(
     () => credentials,
     async (type, c, ctx) => {
       if (type === "workflow.cancel") {
-        coordinator.cancel(String(c.workflowId));
+        const workflowId = resolveWorkflowId(
+          String(c.workflowId),
+          document.workflowAliases,
+        );
+        coordinator.cancel(workflowId);
         for (const h of standalone.values())
-          if (h.record.workflowId === c.workflowId) h.cancel();
+          if (h.record.workflowId === workflowId) h.cancel();
         return null;
       }
       return main(type, c, ctx);
@@ -93,11 +98,16 @@ const engine = new Engine(
     }
   },
   () => Object.values(credentials),
+  () => document.workflowAliases,
 );
 const coordinator = new Coordinator(engine);
 function targetWorkflow(target: Target): WorkflowDefinition {
   if (target.kind === "workflow") {
-    const f = document.workflows.find((w) => w.id === target.workflowId);
+    const f = findWorkflow(
+      document.workflows,
+      target.workflowId,
+      document.workflowAliases,
+    );
     if (!f) throw new Error("Workflow not found");
     return f;
   }
@@ -209,7 +219,11 @@ port.on("message", async (event) => {
       case "run": {
         if (activeRuns.size >= 64)
           throw new Error("Maximum active runs reached (64)");
-        const f = document.workflows.find((f) => f.id === message.workflowId);
+        const f = findWorkflow(
+          document.workflows,
+          message.workflowId,
+          document.workflowAliases,
+        );
         if (!f) throw new Error("Workflow not found");
         const h = engine.start(
           f,

@@ -1,8 +1,14 @@
+import {
+  findWorkflow,
+  resolveWorkflowId,
+  type WorkflowAliases,
+} from "../shared/workflow-identity";
 import { actionById } from "../shared/catalog";
 import type { Graph, Json, WorkflowDefinition } from "../shared/schema";
 export function validateWorkflow(
   workflow: WorkflowDefinition,
   all: WorkflowDefinition[],
+  aliases: WorkflowAliases = {},
 ): string[] {
   const errors: string[] = [];
   const calls = new Set<string>();
@@ -124,23 +130,39 @@ export function validateWorkflow(
               `${label}: retries require explicit confirmation for this side effect`,
             );
         }
-        if (n.action?.type === "workflow.run") {
-          const ref = n.action.config.workflowId;
-          if (typeof ref === "string") calls.add(ref);
-          else errors.push(`${label}: workflow reference must be a literal ID`);
+        for (const field of def?.fields ?? []) {
+          if (field.type !== "workflow") continue;
+          const ref = n.action!.config[field.key];
+          if (typeof ref === "string") {
+            if (n.action!.type === "workflow.run")
+              calls.add(resolveWorkflowId(ref, aliases));
+            else if (!findWorkflow(all, ref, aliases))
+              errors.push(`${label}: missing workflow`);
+          } else if (
+            !ref ||
+            Array.isArray(ref) ||
+            typeof ref !== "object" ||
+            typeof ref.$ref !== "string"
+          )
+            errors.push(`${label}: use a workflow choice or data reference`);
         }
       }
       if (n.kind === "subflow") {
-        if (typeof n.config.workflowId !== "string")
-          errors.push(`${label}: missing subflow ID`);
-        else {
-          calls.add(n.config.workflowId);
-          const child = all.find((f) => f.id === n.config.workflowId);
+        const ref = n.config.workflowId;
+        if (typeof ref === "string") {
+          calls.add(resolveWorkflowId(ref, aliases));
+          const child = findWorkflow(all, ref, aliases);
           if (child && n.config.revision !== child.revision)
             errors.push(
               `${label}: pin the current subflow revision (${child.revision})`,
             );
-        }
+        } else if (
+          !ref ||
+          Array.isArray(ref) ||
+          typeof ref !== "object" ||
+          typeof ref.$ref !== "string"
+        )
+          errors.push(`${label}: missing subflow reference`);
       }
       if (n.kind === "repeat" || n.kind === "foreach") {
         if (!n.body) errors.push(`${label}: missing loop body`);
@@ -168,10 +190,11 @@ export function validateWorkflow(
   graph(workflow.graph, workflow.name);
   const scanCalls = (g: Graph): string[] =>
     g.nodes.flatMap((n) => [
-      ...(n.kind === "subflow"
-        ? [String(n.config.workflowId)]
-        : n.action?.type === "workflow.run"
-          ? [String(n.action.config.workflowId)]
+      ...(n.kind === "subflow" && typeof n.config.workflowId === "string"
+        ? [resolveWorkflowId(n.config.workflowId, aliases)]
+        : n.action?.type === "workflow.run" &&
+            typeof n.action.config.workflowId === "string"
+          ? [resolveWorkflowId(n.action.config.workflowId, aliases)]
           : []),
       ...(n.body ? scanCalls(n.body) : []),
       ...(n.branches?.flatMap(scanCalls) ?? []),

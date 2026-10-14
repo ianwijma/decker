@@ -42,9 +42,10 @@ import {
 import {
   createLatestFlowRunSelector,
   selectFlowWorkflows,
+  selectWorkflowAliases,
 } from "./flow-selectors";
 import "./flow-canvas.css";
-import { SearchableDropdown } from "./SearchableDropdown";
+import { WorkflowDropdown } from "./WorkflowDropdown";
 type Path = Array<{ nodeId: string; branch?: number }>;
 function WorkflowNode({ id, data, selected }: NodeProps<CanvasNode<FlowData>>) {
   const updateNodeInternals = useUpdateNodeInternals();
@@ -251,6 +252,7 @@ export const Flows = memo(function Flows() {
   const edit = useApp((state) => state.edit),
     request = useApp((state) => state.request);
   const workflows = useApp(selectFlowWorkflows);
+  const aliases = useApp(selectWorkflowAliases);
   const doc = { workflows };
   const [flowId, setFlowId] = useState(doc.workflows[0]?.id ?? ""),
     [selected, setSelected] = useState(""),
@@ -313,7 +315,9 @@ export const Flows = memo(function Flows() {
     [workflow?.id],
   );
   const latest = useApp(selectLatestRun);
-  const issues = workflow ? validateWorkflow(workflow, doc.workflows) : [];
+  const issues = workflow
+    ? validateWorkflow(workflow, doc.workflows, aliases)
+    : [];
   const connect = (connection: Connection) =>
     update((_f, g) => {
       const port = connection.sourceHandle ?? "next";
@@ -359,10 +363,9 @@ export const Flows = memo(function Flows() {
             <Plus size={17} />
           </button>
         </div>
-        <SearchableDropdown
-          label="Workflow"
-          searchLabel="Search workflows"
-          options={doc.workflows.map((f) => ({ id: f.id, name: f.name }))}
+        <WorkflowDropdown
+          workflows={doc.workflows}
+          aliases={aliases}
           value={workflow?.id}
           onSelect={(id) => {
             setFlowId(id);
@@ -589,14 +592,21 @@ export const Flows = memo(function Flows() {
                 )}
                 {current.kind === "subflow" && (
                   <FieldLabel label="Subflow">
-                    <select
-                      aria-label="Subflow"
-                      value={String(current.config.workflowId)}
-                      onChange={(e) => {
-                        const child = doc.workflows.find(
-                          (f) => f.id === e.target.value,
-                        );
-                        if (child)
+                    {current.config.workflowId &&
+                    typeof current.config.workflowId === "object" ? (
+                      <p className="muted small">
+                        Workflow selected by data reference below.
+                      </p>
+                    ) : (
+                      <WorkflowDropdown
+                        label="Subflow"
+                        workflows={doc.workflows.filter(
+                          (f) => f.id !== workflow.id,
+                        )}
+                        aliases={aliases}
+                        value={String(current.config.workflowId ?? "")}
+                        onSelect={(id) => {
+                          const child = doc.workflows.find((f) => f.id === id)!;
                           updateNode((n) => {
                             n.config = {
                               ...n.config,
@@ -604,23 +614,29 @@ export const Flows = memo(function Flows() {
                               revision: child.revision,
                             };
                           });
-                      }}
-                    >
-                      <option value="">Choose workflow</option>
-                      {doc.workflows
-                        .filter((f) => f.id !== workflow.id)
-                        .map((f) => (
-                          <option value={f.id} key={f.id}>
-                            {f.name} · v{f.revision}
-                          </option>
-                        ))}
-                    </select>
+                        }}
+                      />
+                    )}
+                    <small>
+                      Selected revision:{" "}
+                      {String(current.config.revision ?? "Choose a workflow")}.
+                      Edit Configuration to pin a revision.
+                    </small>
                   </FieldLabel>
                 )}
                 {current.kind !== "trigger" && current.kind !== "action" && (
                   <JsonEditor
                     label="Configuration"
-                    value={current.config}
+                    value={
+                      current.kind === "subflow" &&
+                      typeof current.config.workflowId === "string"
+                        ? Object.fromEntries(
+                            Object.entries(current.config).filter(
+                              ([key]) => key !== "workflowId",
+                            ),
+                          )
+                        : current.config
+                    }
                     onChange={(value) => {
                       if (
                         value &&
@@ -628,17 +644,23 @@ export const Flows = memo(function Flows() {
                         !Array.isArray(value)
                       )
                         updateNode((n) => {
-                          n.config = value;
+                          n.config =
+                            n.kind === "subflow" &&
+                            !Object.hasOwn(value, "workflowId")
+                              ? { ...value, workflowId: n.config.workflowId }
+                              : value;
                         });
                     }}
                     hint={
-                      current.kind === "condition"
-                        ? "Operators: equals, notEquals, greater, less, contains, truthy."
-                        : current.kind === "parallel"
-                          ? "mode: fail-fast or collect. Every branch has its own scope."
-                          : current.kind === "foreach"
-                            ? "items accepts an array or a data reference. concurrency: 1–16."
-                            : 'Use { "$ref": "outputs.node-id.field", "fallback": null } to bind data.'
+                      current.kind === "subflow"
+                        ? 'The name selector sets the workflow. Pin its revision here, or add workflowId: { "$ref": "inputs.workflow" } for a data reference.'
+                        : current.kind === "condition"
+                          ? "Operators: equals, notEquals, greater, less, contains, truthy."
+                          : current.kind === "parallel"
+                            ? "mode: fail-fast or collect. Every branch has its own scope."
+                            : current.kind === "foreach"
+                              ? "items accepts an array or a data reference. concurrency: 1–16."
+                              : 'Use { "$ref": "outputs.node-id.field", "fallback": null } to bind data.'
                     }
                   />
                 )}
@@ -833,8 +855,6 @@ export const Flows = memo(function Flows() {
                   }}
                 />
                 <p className="muted small">
-                  Workflow ID: {workflow.id}
-                  <br />
                   Running workflows keep their current revision when you edit.
                 </p>
                 <button
