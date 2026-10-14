@@ -1,8 +1,10 @@
+import { bindingTargets } from "./binding-targets";
 import type {
   ActionInstance,
   AppDocument,
   Graph,
   WorkflowDefinition,
+  V3Document,
 } from "./schema";
 import { actionById } from "./catalog";
 import { z } from "zod";
@@ -28,7 +30,7 @@ export function findWorkflow(
 
 export function migrateWorkflowIdentities(
   document: Omit<AppDocument, "schemaVersion" | "workflowAliases">,
-): AppDocument {
+): V3Document {
   const doc = structuredClone(document);
   const ids = [
     ...doc.workflows.map((w) => w.id),
@@ -76,7 +78,7 @@ export function migrateWorkflowIdentities(
   for (const p of doc.profiles)
     for (const page of p.pages)
       for (const b of Object.values(page.keys))
-        for (const target of [b.press, b.release, b.longPress]) {
+        for (const { target } of bindingTargets(b)) {
           if (target?.kind === "workflow")
             target.workflowId = resolveWorkflowId(target.workflowId, aliases);
           else if (target?.kind === "action") action(target.action);

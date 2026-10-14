@@ -74,7 +74,7 @@ async function store() {
 it("fresh defaults generate UUIDs and bind the welcome flow using the same identity", () => {
   const doc = defaults(),
     other = defaults();
-  expect(doc.schemaVersion).toBe(3);
+  expect(doc.schemaVersion).toBe(4);
   expect(z.uuid().safeParse(doc.workflows[0].id).success).toBe(true);
   expect(other.workflows[0].id).not.toBe(doc.workflows[0].id);
   expect(doc.profiles[0].pages[0].keys[2].press).toEqual({
@@ -146,7 +146,7 @@ it("uses one map for every typed nested reference while preserving user data and
   branches[1].nodes[0].action!.config.workflowId = custom;
   expect(migrated).toEqual({
     ...expected,
-    schemaVersion: 3,
+    schemaVersion: 4,
     workflowAliases: { welcome, "custom-old-id": custom },
   });
   expect(migrateDocument(migrated)).toEqual(migrated);
@@ -167,7 +167,7 @@ it("v1 imports retain deck migration semantics and then migrate workflow identit
     activeProfileId: "default",
     activePageId: "home",
   });
-  expect(doc.schemaVersion).toBe(3);
+  expect(doc.schemaVersion).toBe(4);
   expect(doc.decks).toHaveLength(2);
   expect(doc.decks[1].brightness).toBe(30);
   for (const p of doc.profiles)

@@ -1,3 +1,4 @@
+import { bindingTargets } from "./binding-targets";
 import type { ActionInstance, AppDocument, Graph } from "./schema";
 
 export type CredentialOwner = {
@@ -55,8 +56,7 @@ export function credentialOwners(document: AppDocument): CredentialOwner[] {
   for (const profile of document.profiles)
     for (const page of profile.pages)
       for (const binding of Object.values(page.keys)) {
-        for (const phase of ["press", "release", "longPress"] as const) {
-          const target = binding[phase];
+        for (const { phase, target } of bindingTargets(binding)) {
           const path = ["binding", binding.id, phase];
           const label = `${profile.name} / ${page.name} / ${binding.appearance.label || "Key"} / ${phase}`;
           if (target?.kind === "action")

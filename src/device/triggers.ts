@@ -10,7 +10,7 @@ export class Triggers {
   constructor(
     private fire: (
       binding: KeyBinding,
-      target: Target,
+      target: Target | undefined,
       deckId: string,
       phase: "press" | "release" | "longPress",
     ) => void,
@@ -24,7 +24,9 @@ export class Triggers {
       deckId,
     };
     this.held.set(id, held);
-    if (binding.longPress)
+    if (binding.toggle)
+      this.fire(held.binding, undefined, held.deckId, "press");
+    else if (binding.longPress)
       held.timer = setTimeout(() => {
         held.long = true;
         this.fire(
@@ -43,6 +45,7 @@ export class Triggers {
     if (!held) return;
     clearTimeout(held.timer);
     this.held.delete(id);
+    if (held.binding.toggle) return;
     if (held.binding.longPress && !held.long && held.binding.press)
       this.fire(held.binding, held.binding.press, held.deckId, "press");
     if (held.binding.release)
