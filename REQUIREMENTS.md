@@ -1,7 +1,7 @@
 # Decker — Linux Stream Deck application plan
 
 Planning date: 14 October 2026 (Australia/Sydney).
-Status: researched proposal; no application code or dependency installation yet.
+Status: software implementation delivered; see [acceptance coverage](docs/ACCEPTANCE.md) for automated evidence and the hardware/desktop gates still requiring host access. The proposal below is retained as the original scope and architecture reference.
 
 ## Product and confirmed scope
 

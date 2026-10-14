@@ -1,0 +1,828 @@
+import { useMemo, useState } from "react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  Handle,
+  Position,
+  type NodeProps,
+  type Node as CanvasNode,
+  type NodeChange,
+  type Connection,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { ArrowLeft, Play, Plus, Search, Square, Trash2 } from "lucide-react";
+import { useApp } from "./store";
+import { node, uid } from "../../shared/defaults";
+import { actionById, catalog, makeAction } from "../../shared/catalog";
+import type {
+  FlowNode,
+  Graph,
+  Json,
+  WorkflowDefinition,
+} from "../../shared/schema";
+import { validateWorkflow } from "../../runtime/validate";
+import {
+  ActionFields,
+  ActionSelect,
+  FieldLabel,
+  JsonEditor,
+} from "./components";
+type Path = Array<{ nodeId: string; branch?: number }>;
+type FlowData = {
+  name: string;
+  kind: string;
+  ports: string[];
+  status?: string;
+  icon: string;
+};
+function WorkflowNode({ data, selected }: NodeProps<CanvasNode<FlowData>>) {
+  return (
+    <div
+      className={`flow-node ${selected ? "selected" : ""} ${data.status ?? ""}`}
+    >
+      <Handle type="target" position={Position.Left} />
+      <div className="flow-node-icon">{data.icon}</div>
+      <div>
+        <small>{data.kind}</small>
+        <strong>{data.name}</strong>
+      </div>
+      {data.ports.map((port, index) => (
+        <Handle
+          key={port}
+          id={port}
+          type="source"
+          position={Position.Right}
+          style={{ top: `${((index + 1) / (data.ports.length + 1)) * 100}%` }}
+          title={port}
+        />
+      ))}
+      <div className="port-labels">
+        {data.ports.filter((p) => p !== "next").join(" · ")}
+      </div>
+    </div>
+  );
+}
+const nodeTypes = { workflow: WorkflowNode };
+const blocks: Array<{ kind: FlowNode["kind"]; name: string; icon: string }> = [
+  { kind: "trigger", name: "Trigger", icon: "ϟ" },
+  { kind: "delay", name: "Delay", icon: "◷" },
+  { kind: "condition", name: "Condition", icon: "◇" },
+  { kind: "switch", name: "Switch", icon: "⋔" },
+  { kind: "set", name: "Set / map data", icon: "{}" },
+  { kind: "parallel", name: "Parallel / join", icon: "⑂" },
+  { kind: "repeat", name: "Repeat", icon: "↻" },
+  { kind: "foreach", name: "For each", icon: "↻" },
+  { kind: "subflow", name: "Call subflow", icon: "⤷" },
+  { kind: "return", name: "Return", icon: "↵" },
+];
+const emptyGraph = (): Graph => {
+  const first = node("set", "Branch result");
+  first.config = { result: "done" };
+  return { entry: first.id, nodes: [first], edges: [] };
+};
+function at(graph: Graph, path: Path): Graph {
+  let result = graph;
+  for (const step of path) {
+    const parent = result.nodes.find((n) => n.id === step.nodeId)!;
+    result =
+      step.branch === undefined ? parent.body! : parent.branches![step.branch];
+  }
+  return result;
+}
+function newNode(kind: FlowNode["kind"], name: string): FlowNode {
+  const n = node(kind, name);
+  switch (kind) {
+    case "delay":
+      n.config = { ms: 1000 };
+      break;
+    case "condition":
+      n.config = { left: true, operator: "equals", right: true };
+      break;
+    case "switch":
+      n.config = { value: "ready", cases: ["ready", "waiting"] };
+      break;
+    case "set":
+      n.config = { message: "Hello" };
+      break;
+    case "parallel":
+      n.config = { mode: "fail-fast" };
+      n.branches = [emptyGraph(), emptyGraph()];
+      break;
+    case "repeat":
+      n.config = { count: 3, maxIterations: 100 };
+      n.body = emptyGraph();
+      break;
+    case "foreach":
+      n.config = { items: ["one", "two"], maxIterations: 100, concurrency: 1 };
+      n.body = emptyGraph();
+      break;
+    case "subflow":
+      n.config = { workflowId: "", revision: 1, inputs: {} };
+      break;
+    case "return":
+      n.config = { result: { $ref: "inputs" } };
+      break;
+  }
+  return n;
+}
+export function Flows() {
+  const { snapshot, edit, request } = useApp(),
+    doc = snapshot!.document,
+    [flowId, setFlowId] = useState(doc.workflows[0]?.id ?? ""),
+    [selected, setSelected] = useState(""),
+    [search, setSearch] = useState(""),
+    [path, setPath] = useState<Path>([]),
+    [runInputs, setRunInputs] = useState<Json>({});
+  const [positions, setPositions] = useState<
+    Record<string, { x: number; y: number }>
+  >({});
+  const workflow =
+    doc.workflows.find((f) => f.id === flowId) ?? doc.workflows[0];
+  const graph = workflow ? at(workflow.graph, path) : undefined,
+    current = graph?.nodes.find((n) => n.id === selected);
+  const update = (fn: (workflow: WorkflowDefinition, graph: Graph) => void) => {
+    if (workflow)
+      edit((d) => {
+        const f = d.workflows.find((f) => f.id === workflow.id)!;
+        fn(f, at(f.graph, path));
+      });
+  };
+  const updateNode = (fn: (node: FlowNode) => void) =>
+    update((_f, g) => {
+      const n = g.nodes.find((n) => n.id === selected);
+      if (n) fn(n);
+    });
+  const add = (kind: FlowNode["kind"], name: string, action?: string) => {
+    if (!workflow) return;
+    const n = newNode(kind, name);
+    if (action) n.action = makeAction(action);
+    update((f, g) => {
+      const previous = g.nodes.find((n) => n.id === selected) ?? g.nodes.at(-1);
+      g.nodes.push(n);
+      if (
+        previous &&
+        !g.edges.some((e) => e.source === previous.id && e.port === "next") &&
+        !["condition", "switch", "return"].includes(previous.kind)
+      )
+        g.edges.push({
+          id: uid(),
+          source: previous.id,
+          target: n.id,
+          port: "next",
+        });
+      if (g.nodes.length === 1) g.entry = n.id;
+      f.layout[n.id] = {
+        x: 80 + ((g.nodes.length - 1) % 3) * 270,
+        y: 100 + Math.floor((g.nodes.length - 1) / 3) * 170,
+      };
+    });
+    setSelected(n.id);
+  };
+  const latest = snapshot!.runs
+      .filter((r) => r.workflowId === workflow?.id)
+      .at(-1),
+    issues = workflow ? validateWorkflow(workflow, doc.workflows) : [];
+  const canvasNodes = useMemo(
+    () =>
+      graph?.nodes.map((n, index) => ({
+        id: n.id,
+        type: "workflow",
+        position: positions[n.id] ??
+          workflow!.layout[n.id] ?? { x: 60 + index * 270, y: 120 },
+        selected: n.id === selected,
+        data: {
+          name: n.name,
+          kind: n.kind,
+          icon: n.action
+            ? (actionById(n.action.type)?.icon ?? "✦")
+            : (blocks.find((b) => b.kind === n.kind)?.icon ?? "✦"),
+          status: latest?.nodes.filter((x) => x.nodeId === n.id).at(-1)?.status,
+          ports:
+            n.kind === "condition"
+              ? ["true", "false", "error"]
+              : n.kind === "switch"
+                ? [
+                    ...(Array.isArray(n.config.cases)
+                      ? n.config.cases.map(String)
+                      : []),
+                    "default",
+                    "error",
+                  ]
+                : n.kind === "return"
+                  ? []
+                  : ["next", "error"],
+        },
+      })) ?? [],
+    [graph, workflow, selected, latest, positions],
+  );
+  const canvasEdges =
+    graph?.edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.port,
+      label: e.port === "next" ? "" : e.port,
+      animated: latest?.status === "running",
+    })) ?? [];
+  const nodeChanges = (changes: NodeChange<CanvasNode<FlowData>>[]) => {
+    const removed = changes.filter((c) => c.type === "remove").map((c) => c.id);
+    if (removed.length)
+      update((_f, g) => {
+        g.nodes = g.nodes.filter((n) => !removed.includes(n.id));
+        g.edges = g.edges.filter(
+          (e) => !removed.includes(e.source) && !removed.includes(e.target),
+        );
+      });
+    for (const change of changes) {
+      if (change.type === "position" && change.position) {
+        const position = change.position;
+        setPositions((previous) => ({ ...previous, [change.id]: position }));
+      }
+      if (change.type === "select" && change.selected) setSelected(change.id);
+    }
+  };
+  const connect = (connection: Connection) =>
+    update((_f, g) => {
+      const port = connection.sourceHandle ?? "next";
+      g.edges = g.edges.filter(
+        (e) => !(e.source === connection.source && e.port === port),
+      );
+      g.edges.push({
+        id: uid(),
+        source: connection.source,
+        target: connection.target,
+        port,
+      });
+    });
+  return (
+    <div className="workspace flow-workspace">
+      <aside className="secondary-sidebar">
+        <div className="section-heading">
+          YOUR WORKFLOWS
+          <button
+            className="icon-button"
+            aria-label="Create workflow"
+            onClick={() => {
+              const first = node("trigger", "Deck press"),
+                id = uid();
+              edit((d) => {
+                d.workflows.push({
+                  id,
+                  name: `Workflow ${d.workflows.length + 1}`,
+                  revision: 1,
+                  graph: { entry: first.id, nodes: [first], edges: [] },
+                  inputs: [],
+                  outputs: [],
+                  timeoutMs: 300000,
+                  layout: { [first.id]: { x: 80, y: 140 } },
+                });
+              });
+              setFlowId(id);
+              setPath([]);
+              setSelected(first.id);
+            }}
+          >
+            <Plus size={17} />
+          </button>
+        </div>
+        {doc.workflows.map((f) => (
+          <button
+            key={f.id}
+            className={`profile-item ${f.id === workflow?.id ? "active" : ""}`}
+            onClick={() => {
+              setFlowId(f.id);
+              setPath([]);
+              setSelected("");
+            }}
+          >
+            <span>⑂</span>
+            {f.name}
+          </button>
+        ))}
+        <div className="sidebar-divider" />
+        <div className="section-heading">NODE LIBRARY</div>
+        <div className="search">
+          <Search size={16} />
+          <input
+            aria-label="Search nodes"
+            placeholder="Find a node"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <h3 className="palette-heading">Flow control</h3>
+        {blocks
+          .filter((b) => b.name.toLowerCase().includes(search.toLowerCase()))
+          .map((b) => (
+            <button
+              className="catalog-action"
+              key={b.kind}
+              aria-label={`Add ${b.name} node`}
+              onClick={() => add(b.kind, b.name)}
+            >
+              <span className="action-icon">{b.icon}</span>
+              {b.name}
+              <Plus size={13} />
+            </button>
+          ))}
+        <h3 className="palette-heading">Actions</h3>
+        {catalog
+          .filter((a) => a.name.toLowerCase().includes(search.toLowerCase()))
+          .map((a) => (
+            <button
+              key={a.id}
+              className="catalog-action"
+              aria-label={`Add ${a.name} node`}
+              onClick={() => add("action", a.name, a.id)}
+            >
+              <span className={`action-icon group-${a.group.toLowerCase()}`}>
+                {a.icon}
+              </span>
+              {a.name}
+              <Plus size={13} />
+            </button>
+          ))}
+      </aside>
+      <main className="flow-main">
+        {workflow ? (
+          <>
+            <div className="flow-toolbar">
+              <div>
+                <div className="eyebrow">
+                  WORKFLOW STUDIO · REVISION {workflow.revision}
+                </div>
+                <h1>{workflow.name}</h1>
+              </div>
+              <div className="grow" />
+              {latest?.status === "running" ? (
+                <button
+                  onClick={() =>
+                    void request({ type: "cancel", runId: latest.id })
+                  }
+                >
+                  <Square size={15} /> Stop run
+                </button>
+              ) : (
+                <button
+                  className="primary"
+                  disabled={issues.length > 0}
+                  onClick={() =>
+                    void request({
+                      type: "run",
+                      workflowId: workflow.id,
+                      inputs: runInputs as Record<string, Json>,
+                    })
+                  }
+                >
+                  <Play size={15} /> Run workflow
+                </button>
+              )}
+            </div>
+            {path.length > 0 && (
+              <div className="scope-bar">
+                <button
+                  onClick={() => {
+                    setPath(path.slice(0, -1));
+                    setSelected("");
+                  }}
+                >
+                  <ArrowLeft size={14} /> Parent flow
+                </button>
+                <span>
+                  Nested{" "}
+                  {path.at(-1)?.branch === undefined
+                    ? "loop body"
+                    : `parallel branch ${path.at(-1)!.branch! + 1}`}{" "}
+                  · changes saved with parent
+                </span>
+              </div>
+            )}
+            <div className="flow-canvas">
+              <ReactFlow
+                nodes={canvasNodes}
+                edges={canvasEdges}
+                nodeTypes={nodeTypes}
+                onNodeClick={(_e, n) => setSelected(n.id)}
+                onPaneClick={() => setSelected("")}
+                onNodesChange={nodeChanges}
+                onNodeDragStop={(_event, node) =>
+                  update((f) => {
+                    f.layout[node.id] = node.position;
+                  })
+                }
+                onEdgesDelete={(edges) =>
+                  update((_f, g) => {
+                    g.edges = g.edges.filter(
+                      (e) => !edges.some((x) => x.id === e.id),
+                    );
+                  })
+                }
+                onConnect={connect}
+                fitView
+                colorMode="dark"
+                minZoom={0.25}
+                maxZoom={1.6}
+              >
+                <Background gap={24} size={1} />
+                <Controls />
+                <MiniMap pannable zoomable nodeColor="var(--accent)" />
+              </ReactFlow>
+            </div>
+            <div
+              className={`validation-bar ${issues.length ? "has-issues" : ""}`}
+            >
+              <span>
+                {issues.length
+                  ? `${issues.length} validation issue${issues.length === 1 ? "" : "s"}`
+                  : "✓ Workflow is ready"}
+              </span>
+              <span>
+                {graph!.nodes.length} nodes · {graph!.edges.length} connections
+                · {latest ? `Last run: ${latest.status}` : "Never run"}
+              </span>
+            </div>
+            {issues.length > 0 && (
+              <ul className="validation-errors">
+                {issues.map((issue) => (
+                  <li key={issue}>{issue}</li>
+                ))}
+              </ul>
+            )}
+          </>
+        ) : (
+          <div className="empty-state">
+            <h1>Your next great shortcut starts here.</h1>
+            <p>Create a workflow using the + button.</p>
+          </div>
+        )}
+      </main>
+      <aside className="inspector">
+        {workflow && (
+          <>
+            {current ? (
+              <>
+                <div className="inspector-title">
+                  <div>
+                    <div className="eyebrow">NODE PROPERTIES</div>
+                    <h2>{current.kind}</h2>
+                  </div>
+                  <button
+                    className="icon-button"
+                    aria-label="Delete node"
+                    onClick={() => {
+                      update((_f, g) => {
+                        g.nodes = g.nodes.filter((n) => n.id !== selected);
+                        g.edges = g.edges.filter(
+                          (e) => e.source !== selected && e.target !== selected,
+                        );
+                      });
+                      setSelected("");
+                    }}
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                </div>
+                <FieldLabel label="Node name">
+                  <input
+                    aria-label="Node name"
+                    value={current.name}
+                    onChange={(e) =>
+                      updateNode((n) => {
+                        n.name = e.target.value;
+                      })
+                    }
+                  />
+                </FieldLabel>
+                <small className="muted code">ID: {current.id}</small>
+                {current.kind === "action" && current.action && (
+                  <>
+                    <ActionSelect
+                      value={current.action.type}
+                      onChange={(type) =>
+                        updateNode((n) => {
+                          n.action = makeAction(type);
+                        })
+                      }
+                    />
+                    <ActionFields
+                      action={current.action}
+                      onChange={(action) =>
+                        updateNode((n) => {
+                          n.action = action;
+                        })
+                      }
+                      bindings
+                      available={[
+                        ...workflow.inputs.map((i) => `inputs.${i}`),
+                        ...graph!.nodes
+                          .filter((n) => n.id !== selected)
+                          .map((n) => `outputs.${n.id}`),
+                        "vars",
+                        "item",
+                        "index",
+                        "error",
+                      ]}
+                    />
+                  </>
+                )}
+                {current.kind === "subflow" && (
+                  <FieldLabel label="Subflow">
+                    <select
+                      aria-label="Subflow"
+                      value={String(current.config.workflowId)}
+                      onChange={(e) => {
+                        const child = doc.workflows.find(
+                          (f) => f.id === e.target.value,
+                        );
+                        if (child)
+                          updateNode((n) => {
+                            n.config = {
+                              ...n.config,
+                              workflowId: child.id,
+                              revision: child.revision,
+                            };
+                          });
+                      }}
+                    >
+                      <option value="">Choose workflow</option>
+                      {doc.workflows
+                        .filter((f) => f.id !== workflow.id)
+                        .map((f) => (
+                          <option value={f.id} key={f.id}>
+                            {f.name} · v{f.revision}
+                          </option>
+                        ))}
+                    </select>
+                  </FieldLabel>
+                )}
+                {current.kind !== "trigger" && current.kind !== "action" && (
+                  <JsonEditor
+                    label="Configuration"
+                    value={current.config}
+                    onChange={(value) => {
+                      if (
+                        value &&
+                        typeof value === "object" &&
+                        !Array.isArray(value)
+                      )
+                        updateNode((n) => {
+                          n.config = value;
+                        });
+                    }}
+                    hint={
+                      current.kind === "condition"
+                        ? "Operators: equals, notEquals, greater, less, contains, truthy."
+                        : current.kind === "parallel"
+                          ? "mode: fail-fast or collect. Every branch has its own scope."
+                          : current.kind === "foreach"
+                            ? "items accepts an array or a data reference. concurrency: 1–16."
+                            : 'Use { "$ref": "outputs.node-id.field", "fallback": null } to bind data.'
+                    }
+                  />
+                )}
+                {current.body && (
+                  <button
+                    className="primary wide"
+                    onClick={() => {
+                      setPath([...path, { nodeId: current.id }]);
+                      setSelected("");
+                    }}
+                  >
+                    Edit loop body →
+                  </button>
+                )}
+                {current.branches && (
+                  <>
+                    <h3>Parallel branches</h3>
+                    {current.branches.map((_b, index) => (
+                      <button
+                        className="wide branch-button"
+                        key={index}
+                        onClick={() => {
+                          setPath([
+                            ...path,
+                            { nodeId: current.id, branch: index },
+                          ]);
+                          setSelected("");
+                        }}
+                      >
+                        Edit branch {index + 1} →
+                      </button>
+                    ))}
+                    <button
+                      disabled={current.branches.length >= 16}
+                      onClick={() =>
+                        updateNode((n) => {
+                          n.branches!.push(emptyGraph());
+                        })
+                      }
+                    >
+                      <Plus size={14} /> Add branch
+                    </button>
+                    <button
+                      disabled={current.branches.length < 2}
+                      onClick={() =>
+                        updateNode((n) => {
+                          n.branches!.pop();
+                        })
+                      }
+                    >
+                      Remove last branch
+                    </button>
+                    <p className="muted small">
+                      This node joins its own branches before following the next
+                      connection.
+                    </p>
+                  </>
+                )}
+                <details>
+                  <summary>Timeouts & retries</summary>
+                  <FieldLabel label="Node timeout (ms)">
+                    <input
+                      type="number"
+                      min={10}
+                      max={3600000}
+                      value={current.timeoutMs}
+                      onChange={(e) =>
+                        updateNode((n) => {
+                          n.timeoutMs = Number(e.target.value);
+                        })
+                      }
+                    />
+                  </FieldLabel>
+                  <FieldLabel label="Retries">
+                    <input
+                      type="number"
+                      min={0}
+                      max={5}
+                      value={current.retries}
+                      onChange={(e) =>
+                        updateNode((n) => {
+                          n.retries = Number(e.target.value);
+                        })
+                      }
+                    />
+                  </FieldLabel>
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={current.retrySafe}
+                      onChange={(e) =>
+                        updateNode((n) => {
+                          n.retrySafe = e.target.checked;
+                        })
+                      }
+                    />{" "}
+                    I confirm repeating this action is safe
+                  </label>
+                </details>
+                <button
+                  className="wide"
+                  onClick={() =>
+                    update((_f, g) => {
+                      g.entry = current.id;
+                    })
+                  }
+                  disabled={graph!.entry === current.id}
+                >
+                  {graph!.entry === current.id
+                    ? "Entry node"
+                    : "Make entry node"}
+                </button>
+                <details>
+                  <summary>Connections</summary>
+                  {graph!.edges
+                    .filter((e) => e.source === current.id)
+                    .map((edge) => (
+                      <div className="row" key={edge.id}>
+                        <small>
+                          {edge.port} →{" "}
+                          {graph!.nodes.find((n) => n.id === edge.target)?.name}
+                        </small>
+                        <button
+                          aria-label={`Remove ${edge.port} connection`}
+                          onClick={() =>
+                            update((_f, g) => {
+                              g.edges = g.edges.filter((e) => e.id !== edge.id);
+                            })
+                          }
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  <p className="muted small">
+                    Drag an output handle to another node. Error outputs recover
+                    with structured error data.
+                  </p>
+                </details>
+              </>
+            ) : (
+              <>
+                <div className="eyebrow">WORKFLOW SETTINGS</div>
+                <h2>Make it flow.</h2>
+                <p className="muted">
+                  Select a node to configure it. Connect handles to define the
+                  order of work.
+                </p>
+                <FieldLabel label="Workflow name">
+                  <input
+                    aria-label="Workflow name"
+                    value={workflow.name}
+                    onChange={(e) =>
+                      update((f) => {
+                        f.name = e.target.value || "Untitled";
+                      })
+                    }
+                  />
+                </FieldLabel>
+                <FieldLabel label="Run timeout (ms)">
+                  <input
+                    type="number"
+                    value={workflow.timeoutMs}
+                    onChange={(e) =>
+                      update((f) => {
+                        f.timeoutMs = Number(e.target.value);
+                      })
+                    }
+                  />
+                </FieldLabel>
+                <JsonEditor
+                  label="Declared inputs"
+                  value={workflow.inputs}
+                  onChange={(v) => {
+                    if (
+                      Array.isArray(v) &&
+                      v.every((x) => typeof x === "string")
+                    )
+                      update((f) => {
+                        f.inputs = v as string[];
+                      });
+                  }}
+                />
+                <JsonEditor
+                  label="Declared outputs"
+                  value={workflow.outputs}
+                  onChange={(v) => {
+                    if (
+                      Array.isArray(v) &&
+                      v.every((x) => typeof x === "string")
+                    )
+                      update((f) => {
+                        f.outputs = v as string[];
+                      });
+                  }}
+                />
+                <JsonEditor
+                  label="Test inputs"
+                  value={runInputs}
+                  onChange={(v) => {
+                    if (v && typeof v === "object" && !Array.isArray(v))
+                      setRunInputs(v);
+                  }}
+                />
+                <p className="muted small">
+                  Workflow ID: {workflow.id}
+                  <br />
+                  Running workflows keep their current revision when you edit.
+                </p>
+                <button
+                  className="wide"
+                  onClick={() => {
+                    const copy = structuredClone(workflow);
+                    copy.id = uid();
+                    copy.name += " copy";
+                    copy.revision = 1;
+                    edit((d) => {
+                      d.workflows.push(copy);
+                    });
+                    setFlowId(copy.id);
+                    setPath([]);
+                  }}
+                >
+                  Duplicate workflow
+                </button>
+                <button
+                  className="danger wide"
+                  onClick={() => {
+                    edit((d) => {
+                      d.workflows = d.workflows.filter(
+                        (f) => f.id !== workflow.id,
+                      );
+                    });
+                    setPath([]);
+                    setSelected("");
+                  }}
+                >
+                  Delete workflow
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </aside>
+    </div>
+  );
+}

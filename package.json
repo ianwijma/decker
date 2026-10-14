@@ -1,0 +1,97 @@
+{
+  "name": "decker",
+  "version": "0.1.0",
+  "description": "A Linux Stream Deck workspace with local workflows",
+  "private": true,
+  "type": "module",
+  "main": "out/main/index.js",
+  "author": "Decker contributors",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "check": "npm run typecheck && npm test && npm run build",
+    "package": "npm run build && electron-builder --linux deb AppImage",
+    "package:dir": "npm run build && electron-builder --dir",
+    "postinstall": "node scripts/native-check.cjs",
+    "format": "prettier --write src tests scripts *.ts *.json .github/workflows/*.yml",
+    "format:check": "prettier --check src tests scripts *.ts *.json .github/workflows/*.yml"
+  },
+  "dependencies": {
+    "@elgato-stream-deck/node": "^7.8.0",
+    "@xyflow/react": "^12.10.0",
+    "dbus-next": "^0.10.2",
+    "execa": "^9.6.1",
+    "lucide-react": "^0.468.0",
+    "obs-websocket-js": "^5.0.6",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "sharp": "^0.34.5",
+    "xstate": "^5.25.0",
+    "zod": "^4.3.6",
+    "zustand": "^5.0.11"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@tailwindcss/vite": "^4.2.0",
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.8.0",
+    "electron-vite": "^5.0.0",
+    "prettier": "^3.9.10",
+    "tailwindcss": "^4.2.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "vitest": "^4.0.18"
+  },
+  "build": {
+    "appId": "io.decker.desktop",
+    "productName": "Decker",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/*.node",
+      "**/sharp/**",
+      "**/@img/**",
+      "**/node-hid/**"
+    ],
+    "linux": {
+      "target": [
+        "deb",
+        "AppImage"
+      ],
+      "category": "Utility",
+      "icon": "build/icon.png",
+      "maintainer": "Decker contributors <decker@localhost>",
+      "artifactName": "${name}-${version}-${arch}.${ext}",
+      "syncDesktopName": true
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "libusb-1.0-0"
+      ]
+    },
+    "npmRebuild": false
+  },
+  "desktopName": "decker.desktop"
+}
