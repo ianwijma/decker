@@ -622,3 +622,33 @@ it("keeps an externally successful transition stale when its following probe fai
   await h.service.reconcile(deckId, b.id);
   expect(h.state()).toMatchObject({ confirmed: "off", fresh: true });
 });
+
+it("keeps reconciled state through workflow rename/layout saves and invalidates changed execution definitions", async () => {
+  const { doc, b, deckId } = external(),
+    ret = { ...node("return", "Observation"), config: { on: false } },
+    probe = flow(ret);
+  doc.workflows.push(probe);
+  b.toggle!.source = {
+    kind: "external",
+    probe: { kind: "workflow", workflowId: probe.id },
+    timeoutMs: 1000,
+  };
+  const h = harness(doc);
+  await h.service.settled();
+  await h.service.reconcile(deckId, b.id);
+  expect(h.state()).toMatchObject({ confirmed: "off", fresh: true });
+  const reads = h.storage.mock.calls.length;
+  probe.name = "Renamed observer";
+  probe.layout[ret.id] = { x: 300, y: 400 };
+  h.service.configure(doc);
+  await h.service.settled();
+  expect(h.storage).toHaveBeenCalledTimes(reads);
+  expect(h.state()).toMatchObject({ confirmed: "off", fresh: true });
+  ret.config.on = true;
+  probe.revision++;
+  h.service.configure(doc);
+  await h.service.settled();
+  expect(h.state()).toMatchObject({ confirmed: "off", fresh: false });
+  await h.service.reconcile(deckId, b.id);
+  expect(h.state()).toMatchObject({ confirmed: "on", fresh: true });
+});

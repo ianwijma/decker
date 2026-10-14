@@ -67,9 +67,20 @@ export function toggleDefinitionStamp(
     .update(
       JSON.stringify([
         binding,
-        [...dependencies.values()],
-        aliases,
-        [...connections.values()],
+        [...dependencies.values()]
+          .map(({ id, revision, graph, inputs, outputs, timeoutMs }) => ({
+            id,
+            revision,
+            graph,
+            inputs,
+            outputs,
+            timeoutMs,
+          }))
+          .sort((a, b) => a.id.localeCompare(b.id)),
+        Object.entries(aliases).sort(([a], [b]) => a.localeCompare(b)),
+        [...connections.values()]
+          .map(({ id, url, credentialRef }) => ({ id, url, credentialRef }))
+          .sort((a, b) => a.id.localeCompare(b.id)),
       ]),
     )
     .digest("hex");

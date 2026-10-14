@@ -204,12 +204,17 @@ export class Toggles {
         return;
       }
       // A valid external observation can recover a pending/crashed transition.
-      await this.storage({
-        operation: "recover",
-        key: e.key,
-        stamp: e.stamp,
-        confirmed: observed,
-      });
+      try {
+        await this.storage({
+          operation: "recover",
+          key: e.key,
+          stamp: e.stamp,
+          confirmed: observed,
+        });
+      } catch {
+        this.fail(e, "storage", true);
+        return;
+      }
       if (!e.valid) return;
       e.state.confirmed = observed;
       e.state.fresh = true;

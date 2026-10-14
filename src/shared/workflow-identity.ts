@@ -1,3 +1,4 @@
+import { bindingTargets } from "./binding-targets";
 import type {
   ActionInstance,
   AppDocument,
@@ -77,7 +78,7 @@ export function migrateWorkflowIdentities(
   for (const p of doc.profiles)
     for (const page of p.pages)
       for (const b of Object.values(page.keys))
-        for (const target of [b.press, b.release, b.longPress]) {
+        for (const { target } of bindingTargets(b)) {
           if (target?.kind === "workflow")
             target.workflowId = resolveWorkflowId(target.workflowId, aliases);
           else if (target?.kind === "action") action(target.action);
