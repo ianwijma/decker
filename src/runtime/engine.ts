@@ -18,6 +18,7 @@ import type {
 } from "../shared/schema";
 import { checkCondition, redact, resolve, type Scope } from "./data";
 import { withCancellation } from "./cancellation";
+import { Invocations, queuedWorkflows } from "./invocations";
 import { validateWorkflow } from "./validate";
 export type ActionContext = {
   signal: AbortSignal;
@@ -35,8 +36,37 @@ export type RunHandle = {
   record: RunRecord;
   cancel: () => void;
   done: Promise<RunRecord>;
+  containsWorkflow: (id: string) => boolean;
 };
 export class Engine {
+  private active = new Map<
+    string,
+    { invocations: Invocations; cancel: () => void }
+  >();
+  cancelWorkflow(id: string) {
+    for (const root of this.active.values())
+      if (root.invocations.has(id)) root.cancel();
+  }
+  cancelRun(id: string) {
+    this.active.get(id)?.cancel();
+  }
+  prepare(
+    definition: WorkflowDefinition,
+    definitions: WorkflowDefinition[],
+    binding: { bindingId?: string; generation?: number; deckId?: string },
+  ) {
+    const workflow = structuredClone(definition),
+      all = structuredClone(definitions),
+      aliases = structuredClone(this.workflowAliases());
+    const issues = validateWorkflow(workflow, all, aliases);
+    if (issues.length) throw new Error(issues.join("\n"));
+    for (const input of workflow.inputs)
+      throw new Error(`Missing workflow input: ${input}`);
+    return {
+      matchesWorkflow: queuedWorkflows(workflow, all, aliases),
+      launch: () => this.start(workflow, all, {}, binding, aliases),
+    };
+  }
   constructor(
     private handler: Handler,
     private emit: (record: RunRecord) => void,
@@ -48,10 +78,11 @@ export class Engine {
     definitions: WorkflowDefinition[],
     inputs: Record<string, Json> = {},
     binding?: { bindingId?: string; generation?: number; deckId?: string },
+    aliasesSnapshot = this.workflowAliases(),
   ): RunHandle {
     const workflow = structuredClone(definition),
       all = structuredClone(definitions),
-      aliases = structuredClone(this.workflowAliases()),
+      aliases = structuredClone(aliasesSnapshot),
       issues = validateWorkflow(workflow, all, aliases);
     if (issues.length) throw new Error(issues.join("\n"));
     for (const input of workflow.inputs)
@@ -60,6 +91,9 @@ export class Engine {
     const controller = new AbortController(),
       deadline = AbortSignal.timeout(workflow.timeoutMs),
       signal = AbortSignal.any([controller.signal, deadline]);
+    const invocations = new Invocations(aliases),
+      leaveRoot = invocations.enter(workflow.id),
+      cancel = () => controller.abort(new Error("Run cancelled"));
     const record: RunRecord = {
       id: randomUUID(),
       workflowId: workflow.id,
@@ -70,6 +104,7 @@ export class Engine {
       status: "running",
       nodes: [],
     };
+    this.active.set(record.id, { invocations, cancel });
     const publish = () => {
       while (record.nodes.length > 1 && JSON.stringify(record).length > 256000)
         record.nodes.shift();
@@ -122,6 +157,7 @@ export class Engine {
               childInputs: Record<string, Json>,
               revision?: Json,
             ): Promise<Json> => {
+              nodeSignal.throwIfAborted();
               const f = findWorkflow(all, id, aliases);
               if (!f) throw new Error(`Missing subflow: ${id}`);
               if (revision !== undefined && revision !== f.revision)
@@ -131,23 +167,31 @@ export class Engine {
               for (const key of f.inputs)
                 if (!Object.hasOwn(childInputs, key))
                   throw new Error(`Missing subflow input: ${key}`);
-              const result = await runGraph(
-                f.graph,
-                { inputs: childInputs, outputs: {}, vars: {} },
-                AbortSignal.any([nodeSignal, AbortSignal.timeout(f.timeoutMs)]),
-                `${path}/${n.id}:${id}@${f.revision}`,
-              );
-              if (
-                f.outputs.length &&
-                (!result ||
-                  typeof result !== "object" ||
-                  Array.isArray(result) ||
-                  f.outputs.some((key) => !Object.hasOwn(result, key)))
-              )
-                throw new Error(
-                  "Subflow return does not match declared outputs",
+              const leave = invocations.enter(f.id);
+              try {
+                const result = await runGraph(
+                  f.graph,
+                  { inputs: childInputs, outputs: {}, vars: {} },
+                  AbortSignal.any([
+                    nodeSignal,
+                    AbortSignal.timeout(f.timeoutMs),
+                  ]),
+                  `${path}/${n.id}:${id}@${f.revision}`,
                 );
-              return result;
+                if (
+                  f.outputs.length &&
+                  (!result ||
+                    typeof result !== "object" ||
+                    Array.isArray(result) ||
+                    f.outputs.some((key) => !Object.hasOwn(result, key)))
+                )
+                  throw new Error(
+                    "Subflow return does not match declared outputs",
+                  );
+                return result;
+              } finally {
+                leave();
+              }
             };
             switch (n.kind) {
               case "trigger":
@@ -399,6 +443,8 @@ export class Engine {
         }),
       );
       const finish = (error?: unknown) => {
+        leaveRoot();
+        this.active.delete(record.id);
         record.endedAt = Date.now();
         record.status = controller.signal.aborted
           ? "cancelled"
@@ -424,7 +470,8 @@ export class Engine {
     });
     return {
       record,
-      cancel: () => controller.abort(new Error("Run cancelled")),
+      cancel,
+      containsWorkflow: (id) => invocations.has(id),
       done,
     };
   }

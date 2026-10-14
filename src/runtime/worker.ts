@@ -1,4 +1,4 @@
-import { findWorkflow, resolveWorkflowId } from "../shared/workflow-identity";
+import { findWorkflow } from "../shared/workflow-identity";
 import { z } from "zod";
 import { Engine, type ActionContext, type RunHandle } from "./engine";
 import { Coordinator } from "./coordinator";
@@ -29,6 +29,7 @@ const main = async (
   context: ActionContext,
 ) =>
   new Promise<Json>((resolve, reject) => {
+    context.signal.throwIfAborted();
     const id = uid();
     const abort = () => {
       replies.delete(id);
@@ -74,13 +75,8 @@ const engine = new Engine(
     () => credentials,
     async (type, c, ctx) => {
       if (type === "workflow.cancel") {
-        const workflowId = resolveWorkflowId(
-          String(c.workflowId),
-          document.workflowAliases,
-        );
-        coordinator.cancel(workflowId);
-        for (const h of standalone.values())
-          if (h.record.workflowId === workflowId) h.cancel();
+        // The engine already resolved this using the cancelling run's alias snapshot.
+        coordinator.cancelWorkflow(String(c.workflowId));
         return null;
       }
       return main(type, c, ctx);
@@ -89,6 +85,7 @@ const engine = new Engine(
   ),
   (record) => {
     if (record.status === "running") {
+      if (!activeRuns.has(record.id)) send({ type: "run", record });
       activeRuns.add(record.id);
       queuedRecords.set(record.id, record);
     } else {
@@ -237,7 +234,6 @@ port.on("message", async (event) => {
       }
       case "cancel":
         coordinator.cancel(message.id);
-        standalone.get(message.id)?.cancel();
         break;
       case "reply": {
         const reply = replies.get(message.id);

@@ -55,3 +55,47 @@ export function observedAppearance(
   }
   return appearance;
 }
+
+/** Runtime identity: history without deck/generation provenance cannot color a key. */
+export function activityKey(
+  deckId: string,
+  binding: Pick<KeyBinding, "id" | "generation">,
+) {
+  return JSON.stringify([deckId, binding.id, binding.generation]);
+}
+export function selectBindingRun(
+  runs: import("./schema").RunRecord[],
+  binding: KeyBinding,
+  deckId: string,
+) {
+  const matching = runs.filter(
+    (r) =>
+      r.deckId === deckId &&
+      r.bindingId === binding.id &&
+      r.generation === binding.generation,
+  );
+  return matching.findLast((r) => r.status === "running") ?? matching.at(-1);
+}
+
+/** The same composition feeds desktop keys, web views and device frames. */
+export function buttonAppearance(
+  binding: KeyBinding,
+  observed: Record<string, Json>,
+  accent: string,
+  deckId: string,
+) {
+  const appearance = observedAppearance(binding, observed, accent);
+  const feedback = observed.buttonFeedback as
+    Record<string, Record<string, Json>> | undefined;
+  const state = feedback?.[activityKey(deckId, binding)];
+  if (state?.status === "running") appearance.background = accent;
+  else if (state?.status === "success")
+    appearance.background = appearance.success;
+  else if (state?.status === "failure")
+    appearance.background = appearance.error;
+  // Legacy deck.appearance overrides remain independent of transient run activity.
+  if (typeof state?.label === "string") appearance.label = state.label;
+  if (typeof state?.background === "string")
+    appearance.background = state.background;
+  return appearance;
+}

@@ -14,7 +14,7 @@ import { useApp } from "./store";
 import { keySlot, visibleSlot } from "../../shared/decks";
 import { DeckOptions, WebConnect } from "./DeckManager";
 import { binding, uid } from "../../shared/defaults";
-import { observedAppearance } from "../../shared/feedback";
+import { buttonAppearance, selectBindingRun } from "../../shared/feedback";
 import { deviceStatusLabel } from "../../shared/device-status";
 import { actionById } from "../../shared/catalog";
 import type { KeyBinding } from "../../shared/schema";
@@ -78,11 +78,7 @@ export function Deck() {
       setSelected(0);
     });
   const latest = key
-    ? snapshot!.runs
-        .filter(
-          (r) => r.bindingId === key.id && r.generation === key.generation,
-        )
-        .at(-1)
+    ? selectBindingRun(snapshot!.runs, key, deck.id)
     : undefined;
   return (
     <div className="workspace deck-workspace">
@@ -223,26 +219,23 @@ export function Deck() {
               const b = original
                   ? {
                       ...original,
-                      appearance: observedAppearance(
+                      appearance: buttonAppearance(
                         original,
                         snapshot!.observed,
                         doc.settings.accent,
+                        deck.id,
                       ),
                     }
                   : undefined,
                 run = b
-                  ? snapshot!.runs
-                      .filter(
-                        (r) =>
-                          r.bindingId === b.id && r.generation === b.generation,
-                      )
-                      .at(-1)
+                  ? selectBindingRun(snapshot!.runs, b, deck.id)
                   : undefined;
               return (
                 <button
                   key={index}
                   aria-label={`Key ${index + 1}${b ? `: ${b.appearance.label}` : ""}`}
                   aria-pressed={selected === index}
+                  aria-busy={run?.status === "running"}
                   className={`deck-key ${selected === index ? "selected" : ""} ${run?.status === "running" ? "running" : ""}`}
                   style={{ backgroundColor: b?.appearance.background }}
                   onClick={() => setSelected(index)}
