@@ -66,6 +66,14 @@ An administrator can install it as `/etc/udev/rules.d/70-decker.rules`, reload w
 
 Other models use discovered geometry but are **not hardware-verified**. The adapter polls for hotplug, clears held keys on disconnect/suspend, restores the current page and brightness after reconnect, serializes writes and coalesces pending key updates. No missed press is replayed.
 
+## Desktop URL and file actions
+
+Use **Open URL** for HTTP(S) addresses without embedded credentials and **Open file** for host paths. The file selector chooses an existing file and stores its absolute path; manual entry and workflow data references remain available. Relative paths resolve from Decker's application working directory, which can depend on how it was launched. Paths preserve spaces and Unicode, URLs cannot be opened as files, and desktop opening failures appear in run history. Saved **Open URL or file** assignments remain editable and executable without changing their action ID or schema version.
+
+For action authors, `Field.type: "file"` with `picker: "openFile"` adds a native selector beside the normal literal or `$ref` editor. The strict desktop request `{ type: "pickFile", picker: "openFile" }` returns an absolute path string or `null` on cancel; it accepts no caller-supplied filesystem options. `FilePickerButton` invalidates pending results when its document location, field, action configuration or editor navigation changes. The image asset picker remains separate. Paired browsers have only their existing key input protocol and cannot request this dialog.
+
+`ActionDefinition.paletteVisible` defaults to visible. Setting it to `false` excludes an action from `paletteCatalog` and new assignment choices while retaining its definition in `catalog` / `actionById`, import validation and execution. Existing assignments include their hidden action in the editor selector. Future actions can reuse these field and visibility contracts without changing document schema v3.
+
 ## Workflow contract
 
 Actions on keys and graph nodes share the same versioned definitions and configuration schemas. The runtime uses XState promise actors for run lifecycles, a validated structured graph for control flow, and AbortSignals for cancellation. No arbitrary JavaScript is evaluated in field bindings.

@@ -250,6 +250,39 @@ it("clears held sources on reset, disconnect, revoke, stop, and deck deletion", 
   await f.server.stop();
   expect(f.status().running).toBe(false);
 });
+it("does not expose desktop file selection or filesystem requests to paired input", async () => {
+  const f = await fixture(),
+    paired = await f.pair(),
+    { ws } = await connect(f.base, paired.cookie);
+  for (const [index, request] of [
+    { type: "pickFile", picker: "openFile" },
+    { type: "asset" },
+    { type: "desktop.openFile", path: "/etc/passwd" },
+    { type: "request", request: { type: "pickFile", picker: "openFile" } },
+  ].entries()) {
+    ws.send(JSON.stringify({ ...request, sequence: index + 1 }));
+    expect(
+      (await f.post("/api/request", request, { Cookie: paired.cookie })).status,
+    ).toBe(404);
+  }
+  // An authorized key remains usable; only down/up reach the host callback.
+  ws.send(
+    JSON.stringify({ type: "down", key: 0, version: "page-1", sequence: 5 }),
+  );
+  ws.send(JSON.stringify({ type: "up", key: 0, sequence: 6 }));
+  await vi.waitFor(() => expect(f.input).toHaveBeenCalledTimes(2));
+  expect(f.input.mock.calls.map(([event]) => event.down)).toEqual([
+    true,
+    false,
+  ]);
+  expect(
+    f.input.mock.calls.every(
+      ([event]) =>
+        Object.keys(event).sort().join() === "deckId,down,key,source",
+    ),
+  ).toBe(true);
+  ws.close();
+});
 it("rejects foreign origins and hosts and serves only the browser bundle and authorized key assets", async () => {
   const f = await fixture();
   expect(

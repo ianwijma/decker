@@ -375,6 +375,9 @@ export const requestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("import") }),
   z.object({ type: z.literal("export") }),
   z.object({ type: z.literal("asset") }),
+  z
+    .object({ type: z.literal("pickFile"), picker: z.literal("openFile") })
+    .strict(),
   z.object({
     type: z.literal("credential"),
     ref: id,

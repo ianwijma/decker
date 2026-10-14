@@ -4,7 +4,7 @@ import { selectFlowWorkflows, selectWorkflowAliases } from "./flow-selectors";
 import { useEffect, useState, type ReactNode } from "react";
 import { Plus, Search } from "lucide-react";
 import {
-  catalog,
+  paletteCatalog,
   actionById,
   makeAction,
   type Field,
@@ -15,6 +15,7 @@ import type {
   Target,
   WorkflowDefinition,
 } from "../../shared/schema";
+import { actionLocation, FilePickerButton } from "./file-picker";
 export function FieldLabel({
   label,
   children,
@@ -92,6 +93,17 @@ export function ActionFields({
 }) {
   const workflows = useApp(selectFlowWorkflows),
     aliases = useApp(selectWorkflowAliases);
+  const scope = useApp((state) => {
+    const doc = state.snapshot?.document;
+    const deck = doc?.decks.find((d) => d.id === doc.activeDeckId);
+    return JSON.stringify([
+      state.tab,
+      deck?.id,
+      deck?.activeProfileId,
+      deck?.activePageId,
+      actionLocation(doc, action),
+    ]);
+  });
   const definition = actionById(action.type);
   if (!definition)
     return <p className="danger-text">Unknown action: {action.type}</p>;
@@ -105,7 +117,7 @@ export function ActionFields({
           bound = value !== null && typeof value === "object";
         return (
           <div key={field.key}>
-            <FieldLabel label={field.label}>
+            <FieldLabel label={field.label} hint={field.hint}>
               {bound ? (
                 <JsonEditor
                   label={`${field.label} binding`}
@@ -161,6 +173,15 @@ export function ActionFields({
                 />
               )}
             </FieldLabel>
+            {field.type === "file" && field.picker === "openFile" && (
+              <FilePickerButton
+                scope={scope}
+                action={action}
+                fieldKey={field.key}
+                label={field.label}
+                onSelect={(path) => change(field, path)}
+              />
+            )}
             {bindings && (
               <select
                 className="binding-picker"
@@ -216,7 +237,7 @@ export function TargetEditor({
                         kind: "sequence",
                         actions: [makeAction("desktop.notify")],
                       }
-                    : { kind: "action", action: makeAction("desktop.open") },
+                    : { kind: "action", action: makeAction("desktop.openUrl") },
             )
           }
         >
@@ -334,7 +355,12 @@ export function ActionSelect({
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
-        {catalog.map((a) => (
+        {actionById(value)?.paletteVisible === false && (
+          <option value={value}>
+            {actionById(value)!.group} / {actionById(value)!.name} (legacy)
+          </option>
+        )}
+        {paletteCatalog.map((a) => (
           <option key={a.id} value={a.id}>
             {a.group} / {a.name}
           </option>
@@ -348,7 +374,7 @@ export function Catalog({ onPick }: { onPick: (type: string) => void }) {
   return (
     <>
       <div className="section-heading">
-        ACTION LIBRARY <span>{catalog.length}</span>
+        ACTION LIBRARY <span>{paletteCatalog.length}</span>
       </div>
       <div className="search">
         <Search size={16} />
@@ -362,7 +388,7 @@ export function Catalog({ onPick }: { onPick: (type: string) => void }) {
       {["Developer", "Desktop", "Streaming", "Deck"].map((group) => (
         <div key={group} className="catalog-group">
           <h3>{group}</h3>
-          {catalog
+          {paletteCatalog
             .filter(
               (a) =>
                 a.group === group &&
