@@ -26,6 +26,8 @@ export type Field = {
     | "secret"
     | "connection"
     | "workflow"
+    | "profile"
+    | "page"
     | "file"
     | "json";
   /** For a file field, offer the desktop-only native selector beside manual entry. */
@@ -317,7 +319,7 @@ const definitions: Omit<
     icon: "▦",
     description: "Navigate to a page or nested folder.",
     capabilities: [],
-    fields: [f("pageId", "Page ID", "")],
+    fields: [f("pageId", "Page / folder", "", "page")],
     idempotent: true,
   },
   {
@@ -327,7 +329,7 @@ const definitions: Omit<
     icon: "▤",
     description: "Activate a profile and its first page.",
     capabilities: [],
-    fields: [f("profileId", "Profile ID", "")],
+    fields: [f("profileId", "Profile", "", "profile")],
     idempotent: true,
   },
   {

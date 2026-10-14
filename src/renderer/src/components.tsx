@@ -6,6 +6,7 @@ import {
 } from "../../shared/data-presentation";
 import { ExpressionEditor } from "./ExpressionEditor";
 import { WorkflowDropdown } from "./WorkflowDropdown";
+import { NavigationTargetDropdown } from "./NavigationTargetDropdown";
 import { useApp } from "./store";
 import { selectFlowWorkflows, selectWorkflowAliases } from "./flow-selectors";
 import { useEffect, useState, type ReactNode } from "react";
@@ -152,6 +153,12 @@ export function ActionFields({
                 <WorkflowDropdown
                   workflows={workflows}
                   aliases={aliases}
+                  value={String(value)}
+                  onSelect={(id) => setValue(id)}
+                />
+              ) : field.type === "profile" || field.type === "page" ? (
+                <NavigationTargetDropdown
+                  kind={field.type}
                   value={String(value)}
                   onSelect={(id) => setValue(id)}
                 />
