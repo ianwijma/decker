@@ -17,6 +17,7 @@ async function launch() {
     timeout: 30000,
   });
   const page = await app.firstWindow();
+  await page.getByRole("button", { name: "Deck: My XL", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Everything, a key away." }),
   ).toBeVisible();

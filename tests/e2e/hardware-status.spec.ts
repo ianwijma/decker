@@ -14,6 +14,9 @@ test("captured permission failure has truthful badges, device details and workin
   });
   try {
     const page = await app.firstWindow();
+    await page
+      .getByRole("button", { name: "Deck: My XL", exact: true })
+      .click();
     await expect(
       page.getByRole("heading", { name: "Everything, a key away." }),
     ).toBeVisible();
@@ -70,7 +73,8 @@ test("captured permission failure has truthful badges, device details and workin
         const send = contents.send.bind(contents);
         const fixture = JSON.parse(evidence);
         // Keep the IPC fixture stable across the real worker's periodic empty
-        // discovery reports; restore the real stream before exercising Retry.
+        // discovery reports until Retry is activated. Restoring before the
+        // click can remove its button while Playwright is checking actionability.
         contents.send = (channel, ...args) => {
           if (channel === "decker:snapshot")
             send(channel, { ...args[0], devices: fixture.devices });
@@ -108,14 +112,14 @@ test("captured permission failure has truthful badges, device details and workin
       path: "test-results/hardware-permission.png",
       fullPage: true,
     });
+    await page
+      .getByRole("button", { name: "Retry device", exact: true })
+      .click();
     await app.evaluate(() => {
       (
         globalThis as unknown as { restoreHardwareSnapshot: () => void }
       ).restoreHardwareSnapshot();
     });
-    await page
-      .getByRole("button", { name: "Retry device", exact: true })
-      .click();
     await expect(page.getByText("Disconnected", { exact: true })).toBeVisible();
     await expect(page.getByRole("alert")).toHaveCount(0);
     const result = await page.evaluate(() => window.decker.snapshot());

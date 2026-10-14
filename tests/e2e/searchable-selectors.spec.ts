@@ -21,6 +21,7 @@ async function launch() {
   await expect(
     page.getByRole("button", { name: "Deck: My XL", exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Deck: My XL", exact: true }).click();
   return page;
 }
 test.beforeEach(async () => {
@@ -260,6 +261,7 @@ test("55 profiles use normal navigation, activate creation and stay deck scoped 
   await expect(search).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await page.reload();
+  await page.getByRole("button", { name: "Deck: My XL", exact: true }).click();
   await expect(trigger).toHaveText("Created and active");
   await app.close();
   page = await launch();

@@ -1,7 +1,6 @@
 import React, { useEffect, useState, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  Grid2X2,
   Workflow,
   Plus,
   Settings as SettingsIcon,
@@ -10,7 +9,9 @@ import {
 } from "lucide-react";
 import { useApp } from "./store";
 import { Deck } from "./Deck";
-import { deviceStatusLabel } from "../../shared/device-status";
+import { Home } from "./Home";
+import { DiscoveryPrompts } from "./DiscoveryPrompts";
+import { deckReadiness } from "./home-health";
 const Flows = lazy(() =>
   import("./Flows").then((module) => ({ default: module.Flows })),
 );
@@ -41,6 +42,11 @@ function App() {
   const { snapshot, receive, tab, setTab, error, setError, saving, request } =
     useApp();
   const [adding, setAdding] = useState(false);
+  const [devicePrefill, setDevicePrefill] = useState<string>();
+  const addDeck = (deviceId?: string) => {
+    setDevicePrefill(deviceId);
+    setAdding(true);
+  };
   useEffect(() => {
     void window.decker
       .snapshot()
@@ -71,12 +77,14 @@ function App() {
       </div>
     );
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${tab === "home" ? "home-shell" : ""}`}>
       <nav className="rail" aria-label="Main navigation">
         <button
           className="app-logo"
           aria-label="Decker home"
-          onClick={() => setTab("deck")}
+          title="Home"
+          aria-current={tab === "home" ? "page" : undefined}
+          onClick={() => setTab("home")}
         >
           <Command size={26} />
         </button>
@@ -85,6 +93,7 @@ function App() {
           className={`rail-item ${tab === "flows" ? "active" : ""}`}
           title="Flows"
           aria-label="Flows"
+          aria-current={tab === "flows" ? "page" : undefined}
           onClick={() => setTab("flows")}
         >
           <Workflow size={23} />
@@ -93,22 +102,18 @@ function App() {
         <div className="rail-divider" />
         <div className="deck-rail-list">
           {snapshot.document.decks.map((deck) => {
-            const hardware = snapshot.devices.find(
-              (d) => d.id === deck.hardwareId,
-            );
-            const online =
-              deck.kind === "simulator" ||
-              (deck.kind === "web"
-                ? snapshot.web.clients.some(
-                    (c) => c.deckId === deck.id && c.online,
-                  )
-                : hardware?.state === "ready");
+            const status = deckReadiness(snapshot, deck);
             return (
               <button
                 key={deck.id}
                 className={`rail-item deck-rail-item ${tab === "deck" && snapshot.document.activeDeckId === deck.id ? "active" : ""}`}
                 aria-label={`Deck: ${deck.name}`}
-                title={`${deck.name} · ${deck.kind} · ${deck.kind === "hardware" ? deviceStatusLabel(hardware) : online ? "connected" : "offline"}`}
+                aria-current={
+                  tab === "deck" && snapshot.document.activeDeckId === deck.id
+                    ? "page"
+                    : undefined
+                }
+                title={`${deck.name} · ${deck.kind} · ${status.label}`}
                 onClick={() => {
                   void request({ type: "selectDeck", deckId: deck.id });
                   setTab("deck");
@@ -121,16 +126,17 @@ function App() {
                 )}
                 <small>{deck.name}</small>
                 <i
-                  className={`deck-connection-dot ${online ? "connected" : ""}`}
+                  className={`deck-connection-dot ${status.ready ? "connected" : ""}`}
                 />
               </button>
             );
           })}
+          <DiscoveryPrompts snapshot={snapshot} onAdd={addDeck} />
           <button
             className="rail-item add-deck-button"
             aria-label="Add deck"
             title="Add deck"
-            onClick={() => setAdding(true)}
+            onClick={() => addDeck()}
           >
             <Plus size={23} />
             <small>Add deck</small>
@@ -142,6 +148,7 @@ function App() {
           className={`rail-item ${tab === "settings" ? "active" : ""}`}
           title="Settings"
           aria-label="Settings"
+          aria-current={tab === "settings" ? "page" : undefined}
           onClick={() => setTab("settings")}
         >
           <SettingsIcon size={23} />
@@ -151,11 +158,13 @@ function App() {
       <div className="app-body">
         <header className="topbar">
           <strong>
-            {tab === "deck"
-              ? "Deck workspace"
-              : tab === "flows"
-                ? "Workflow studio"
-                : "Settings"}
+            {tab === "home"
+              ? "Home"
+              : tab === "deck"
+                ? "Deck workspace"
+                : tab === "flows"
+                  ? "Workflow studio"
+                  : "Settings"}
           </strong>
           <span className="topbar-divider" />
           <span>Less clicking. More creating.</span>
@@ -180,14 +189,16 @@ function App() {
           </div>
         )}
         <ErrorBoundary>
-          {tab === "deck" ? (
+          {tab === "home" ? (
+            <Home onAdd={() => addDeck()} />
+          ) : tab === "deck" ? (
             snapshot.document.decks.length ? (
               <Deck key={snapshot.document.activeDeckId} />
             ) : (
               <div className="empty-state">
                 <h1>Create your first deck.</h1>
                 <p>Connect a Stream Deck or create a browser deck.</p>
-                <button className="primary" onClick={() => setAdding(true)}>
+                <button className="primary" onClick={() => addDeck()}>
                   Add deck
                 </button>
               </div>
@@ -205,7 +216,12 @@ function App() {
           )}
         </ErrorBoundary>
       </div>
-      {adding && <AddDeck onClose={() => setAdding(false)} />}
+      {adding && (
+        <AddDeck
+          devicePrefill={devicePrefill}
+          onClose={() => setAdding(false)}
+        />
+      )}
       {error && (
         <div role="alert" className="toast">
           <div>

@@ -5,6 +5,7 @@ import { useApp } from "./store";
 import { FieldLabel } from "./components";
 import { visibleSlot } from "../../shared/decks";
 import type { DeckConfig } from "../../shared/schema";
+import { discoverDevices } from "./home-health";
 const icons = [
   "▦",
   "🎛",
@@ -123,7 +124,13 @@ function IconPicker({
     </div>
   );
 }
-export function AddDeck({ onClose }: { onClose: () => void }) {
+export function AddDeck({
+  onClose,
+  devicePrefill,
+}: {
+  onClose: () => void;
+  devicePrefill?: string;
+}) {
   const { snapshot, request, setTab } = useApp(),
     [kind, setKind] = useState<"hardware" | "web" | "simulator">("hardware"),
     [name, setName] = useState("My web deck"),
@@ -134,13 +141,26 @@ export function AddDeck({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     void request({ type: "diagnose" });
   }, [request]);
-  const available = snapshot!.devices.filter(
-    (d) =>
-      !d.simulated &&
-      !snapshot!.document.decks.some((deck) => deck.hardwareId === d.id),
-  );
-  const add = async (hardware?: (typeof available)[number]) => {
+  const available = discoverDevices(snapshot!);
+  const hardwareChoices = devicePrefill
+    ? available.filter((device) => device.id === devicePrefill)
+    : available;
+  const add = async (hardwareId?: string) => {
     setBusy(true);
+    // Read the live store at confirmation time. IPC revalidates availability as
+    // well, so unplugging or a pending save cannot add a stale device.
+    const hardware = hardwareId
+      ? discoverDevices(useApp.getState().snapshot!).find(
+          (device) => device.id === hardwareId,
+        )
+      : undefined;
+    if (
+      kind === "hardware" &&
+      (!hardware || hardware.id.startsWith("session:"))
+    ) {
+      setBusy(false);
+      return;
+    }
     const result = await request({
       type: "addDeck",
       kind,
@@ -184,9 +204,12 @@ export function AddDeck({ onClose }: { onClose: () => void }) {
             Looking for a new Stream Deck… Connect it by USB. Existing decks
             stay in your sidebar when unplugged.
           </p>
-          {available.length ? (
-            available.map((device) => (
-              <div className="discovered-deck" key={device.id}>
+          {hardwareChoices.length ? (
+            hardwareChoices.map((device) => (
+              <div
+                className={`discovered-deck ${device.id === devicePrefill ? "discovery-selected" : ""}`}
+                key={device.id}
+              >
                 <Usb size={24} />
                 <div>
                   <strong>{device.name}</strong>
@@ -197,7 +220,7 @@ export function AddDeck({ onClose }: { onClose: () => void }) {
                 <button
                   className="primary"
                   disabled={busy || device.id.startsWith("session:")}
-                  onClick={() => void add(device)}
+                  onClick={() => void add(device.id)}
                 >
                   Add Stream Deck
                 </button>
@@ -211,7 +234,11 @@ export function AddDeck({ onClose }: { onClose: () => void }) {
           ) : (
             <div className="empty-state">
               <Usb size={30} />
-              <h3>No new Stream Deck found</h3>
+              <h3>
+                {devicePrefill
+                  ? "Selected Stream Deck is no longer available"
+                  : "No new Stream Deck found"}
+              </h3>
               <p>You can create a web deck while waiting for hardware.</p>
             </div>
           )}

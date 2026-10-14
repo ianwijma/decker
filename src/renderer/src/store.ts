@@ -4,7 +4,7 @@ type State = {
   snapshot?: Snapshot;
   error?: string;
   saving: boolean;
-  tab: "deck" | "flows" | "settings";
+  tab: "home" | "deck" | "flows" | "settings";
   settingsSection: "general" | "web" | "diagnostics" | "runs";
   setSettingsSection: (section: State["settingsSection"]) => void;
   setTab: (tab: State["tab"]) => void;
@@ -18,7 +18,7 @@ let pending = Promise.resolve(),
   saves = 0;
 export const useApp = create<State>((set, get) => ({
   saving: false,
-  tab: "deck",
+  tab: "home",
   settingsSection: "general",
   setSettingsSection: (settingsSection) => set({ settingsSection }),
   setTab: (tab) => set({ tab }),
