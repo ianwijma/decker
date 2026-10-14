@@ -40,7 +40,8 @@ import {
   type WebDeckView,
 } from "../shared/schema";
 import { Triggers } from "../device/triggers";
-import { observedAppearance } from "../shared/feedback";
+import { buttonAppearance } from "../shared/feedback";
+import { ButtonActivity } from "../runtime/activity";
 import { redact } from "../runtime/data";
 import {
   buildHealth,
@@ -95,6 +96,7 @@ const snapshot = (): Snapshot => {
   const safeObserved = Object.fromEntries(
     Object.entries({
       ...observed,
+      buttonFeedback: feedback.snapshot(),
       diagnostics: diagnosticFaults.snapshot(),
     }).map(([key, value]) => [key, redactDiagnostics(value, secrets)]),
   );
@@ -193,23 +195,12 @@ function deckAppearance(deckId: string) {
   for (let i = 0; i < deck.rows * deck.columns; i++) {
     const binding = source.keys[keySlot(i, deck.columns)];
     if (!binding) continue;
-    const appearance = observedAppearance(
-        binding,
-        observed,
-        document.settings.accent,
-      ),
-      state = feedback.get(binding.id);
-    if (state?.generation === binding.generation) {
-      if (["running", "success", "failure"].includes(state.state))
-        appearance.background =
-          state.state === "running"
-            ? document.settings.accent
-            : state.state === "success"
-              ? appearance.success
-              : appearance.error;
-      if (state.label) appearance.label = state.label;
-      if (state.background) appearance.background = state.background;
-    }
+    const appearance = buttonAppearance(
+      binding,
+      { ...observed, buttonFeedback: feedback.snapshot() },
+      document.settings.accent,
+      deckId,
+    );
     keys[i] = {
       label: appearance.label,
       icon: appearance.icon,
@@ -291,16 +282,7 @@ function input(deckId: string, source: string, key: number, down: boolean) {
     );
   else triggers.up(source, key);
 }
-const feedback = new Map<
-  string,
-  {
-    runId: string;
-    generation: number;
-    state: string;
-    label?: string;
-    background?: string;
-  }
->();
+const feedback = new ButtonActivity();
 function configureDevice() {
   post("device", {
     type: "configure",
@@ -330,6 +312,7 @@ function configureDevice() {
   configureWeb();
 }
 function configure() {
+  feedback.reconcile(document);
   for (const key of Object.keys(observed))
     if (
       key.startsWith("obs:") &&
@@ -427,13 +410,12 @@ async function mainAction(
           .string()
           .regex(/^#[a-fA-F0-9]{6}$/)
           .parse(c.background);
-        feedback.set(binding.id, {
-          runId: context.runId,
-          generation: binding.generation,
-          state: "custom",
-          label: String(c.label).slice(0, 80),
+        feedback.override(
+          deck!.id,
+          binding,
+          String(c.label).slice(0, 80),
           background,
-        });
+        );
         configureDevice();
       }
       return null;
@@ -536,34 +518,14 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         runs = [...finished, ...active].sort(
           (a, b) => a.startedAt - b.startedAt,
         );
-        if (record.bindingId) {
-          const current = feedback.get(record.bindingId);
-          if (
-            !current ||
-            current.runId === record.id ||
-            record.status === "running"
-          ) {
-            feedback.set(record.bindingId, {
-              ...current,
-              runId: record.id,
-              generation: record.generation!,
-              state: record.status,
-            });
+        feedback.update(record, document);
+        configureDevice();
+        if (record.status === "success" || record.status === "failure")
+          setTimeout(() => {
+            feedback.expire();
             configureDevice();
-            if (record.status !== "running")
-              setTimeout(() => {
-                const feedbackNow = feedback.get(record.bindingId!);
-                if (
-                  feedbackNow?.runId === record.id &&
-                  !feedbackNow.label &&
-                  !feedbackNow.background
-                ) {
-                  feedback.delete(record.bindingId!);
-                  configureDevice();
-                }
-              }, 1500).unref();
-          }
-        }
+            publish();
+          }, 1500).unref();
         publish();
         persist();
       } else if (message.type === "capabilities") {
@@ -628,6 +590,8 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         errorDetails: undefined,
       }));
     } else if (name === "runner") {
+      feedback.interrupt();
+      configureDevice();
       runs = runs.map((r) =>
         r.status === "running"
           ? {
