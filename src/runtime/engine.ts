@@ -206,6 +206,16 @@ export class Engine {
                     Json
                   >,
                 };
+                const definition = actionById(action.type);
+                if (!definition || action.version !== definition.version)
+                  throw new Error(`Unsupported action: ${action.type}`);
+                const parsed = definition.schema.safeParse(action.config);
+                if (!parsed.success)
+                  throw new Error(
+                    parsed.error.issues
+                      .map((i) => `${i.path.join(".")}: ${i.message}`)
+                      .join(", "),
+                  );
                 for (const field of actionById(action.type)?.fields ?? [])
                   if (field.type === "workflow") {
                     const ref = action.config[field.key];

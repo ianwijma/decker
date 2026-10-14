@@ -1,4 +1,11 @@
 import { z } from "zod";
+import { decodeArgs } from "./data-contract";
+import {
+  extractValueSchema,
+  httpOutputSchema,
+  parseJsonSchema,
+  valueOutputSchema,
+} from "./data-actions";
 import type { ActionInstance } from "./schema";
 import { desktopPathSchema, desktopUrlSchema } from "./desktop-target";
 import { mediaActions } from "./media";
@@ -6,7 +13,14 @@ export type Field = {
   key: string;
   label: string;
   type?:
-    "text" | "number" | "boolean" | "select" | "secret" | "workflow" | "file";
+    | "text"
+    | "number"
+    | "boolean"
+    | "select"
+    | "secret"
+    | "workflow"
+    | "file"
+    | "json";
   /** For a file field, offer the desktop-only native selector beside manual entry. */
   picker?: "openFile";
   options?: string[];
@@ -140,6 +154,31 @@ const definitions: Omit<
       f("credentialRef", "Bearer credential reference", ""),
     ],
     idempotent: false,
+  },
+  {
+    id: "data.parseJson",
+    name: "Parse JSON",
+    group: "Developer",
+    icon: "{}",
+    description:
+      "Parse complete JSON text or an HTTP result, rejecting known truncation.",
+    capabilities: [],
+    fields: [f("input", "JSON text or HTTP result", "{}", "json")],
+    idempotent: true,
+  },
+  {
+    id: "data.extract",
+    name: "Extract value",
+    group: "Developer",
+    icon: ".",
+    description:
+      "Read an own property with a dot path or segment array. Optional fallback handles missing values.",
+    capabilities: [],
+    fields: [
+      f("input", "Input value", "", "json"),
+      f("path", "Data path", "value", "json"),
+    ],
+    idempotent: true,
   },
   {
     id: "desktop.notify",
@@ -336,47 +375,67 @@ const definitions: Omit<
     idempotent: true,
   },
 ];
-export const catalog: ActionDefinition[] = definitions.map((d) => ({
-  ...d,
-  version: 1,
-  inputSchema: z.record(z.string(), z.unknown()),
-  outputSchema: z.unknown(),
-  schema: z.object(
-    Object.fromEntries(
-      d.fields.map((field) => [
-        field.key,
-        d.id === "desktop.openUrl" && field.key === "url"
-          ? desktopUrlSchema
-          : d.id === "desktop.openFile" && field.key === "path"
-            ? desktopPathSchema
-            : field.type === "number"
-              ? z.number()
-              : field.type === "boolean"
-                ? z.boolean()
-                : field.options
-                  ? z.enum(field.options as [string, ...string[]])
-                  : field.key === "args"
-                    ? z.string().refine((value) => {
-                        try {
-                          const args = JSON.parse(value);
-                          return (
-                            Array.isArray(args) &&
-                            args.length <= 256 &&
-                            args.every((a) => typeof a === "string")
-                          );
-                        } catch {
-                          return false;
-                        }
-                      }, "Use a JSON array of at most 256 string arguments")
-                    : ["executable", "url", "target", "keys"].includes(
-                          field.key,
-                        )
-                      ? z.string().min(1)
-                      : z.string(),
-      ]),
-    ),
-  ),
-}));
+const argsSchema = z
+  .union([z.string(), z.array(z.string()).max(256)])
+  .superRefine((value, ctx) => {
+    try {
+      decodeArgs(value);
+    } catch (error) {
+      ctx.addIssue({ code: "custom", message: (error as Error).message });
+    }
+  });
+const commandOutputSchema = z.object({
+  stdout: z.string(),
+  stderr: z.string(),
+  exitCode: z.number().int(),
+});
+export const catalog: ActionDefinition[] = definitions.map((d) => {
+  const schema =
+    d.id === "data.parseJson"
+      ? parseJsonSchema
+      : d.id === "data.extract"
+        ? extractValueSchema
+        : z.object(
+            Object.fromEntries(
+              d.fields.map((field) => [
+                field.key,
+                d.id === "desktop.openUrl" && field.key === "url"
+                  ? desktopUrlSchema
+                  : d.id === "desktop.openFile" && field.key === "path"
+                    ? desktopPathSchema
+                    : field.type === "number"
+                      ? z.number()
+                      : field.type === "boolean"
+                        ? z.boolean()
+                        : field.options
+                          ? z.enum(field.options as [string, ...string[]])
+                          : field.key === "args"
+                            ? argsSchema
+                            : ["executable", "url", "target", "keys"].includes(
+                                  field.key,
+                                )
+                              ? z.string().min(1)
+                              : z.string(),
+              ]),
+            ),
+          );
+  return {
+    ...d,
+    version: 1,
+    schema,
+    inputSchema: schema,
+    outputSchema:
+      d.id === "http.request"
+        ? httpOutputSchema
+        : d.id === "data.parseJson" || d.id === "data.extract"
+          ? valueOutputSchema
+          : d.id === "command.run" || d.id === "command.shell"
+            ? commandOutputSchema
+            : d.id === "app.launch"
+              ? z.object({ pid: z.number().int() })
+              : z.unknown(),
+  };
+});
 export const actionById = (id: string) => catalog.find((d) => d.id === id);
 // Visibility affects only new assignments, never lookup, import or execution.
 export const paletteCatalog = catalog.filter((d) => d.paletteVisible !== false);

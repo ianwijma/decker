@@ -1,3 +1,4 @@
+import { inspectExpressions } from "../shared/data-contract";
 import {
   findWorkflow,
   resolveWorkflowId,
@@ -56,27 +57,21 @@ export function validateWorkflow(
         dominators.set(n.id, common ?? new Set());
       }
     const refs = (value: Json, available: Set<string>, label: string) => {
-      if (Array.isArray(value)) value.forEach((v) => refs(v, available, label));
-      else if (value && typeof value === "object") {
-        if (typeof value.$ref === "string") {
-          const [root, key] = value.$ref.split(".");
+      try {
+        inspectExpressions(value, ([root, key], hasFallback) => {
           if (
             root === "outputs" &&
-            !available.has(key) &&
-            !Object.hasOwn(value, "fallback")
+            (!key || !available.has(key)) &&
+            !hasFallback
           )
             errors.push(
-              `${label}: output ${key} is not available on every path; add a fallback`,
+              `${label}: output ${key ?? "*"} is not available on every path; add a fallback`,
             );
-          if (
-            value.$ref
-              .split(".")
-              .some((p) =>
-                ["__proto__", "constructor", "prototype"].includes(p),
-              )
-          )
-            errors.push(`${label}: unsafe data path`);
-        } else Object.values(value).forEach((v) => refs(v, available, label));
+        });
+      } catch (error) {
+        errors.push(
+          `${label}: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     };
     for (const n of g.nodes) {
@@ -115,15 +110,24 @@ export function validateWorkflow(
         else {
           if (n.action!.version !== def.version)
             errors.push(`${label}: unsupported action version`);
-          const literal = Object.values(n.action!.config).every(
-            (v) => !v || typeof v !== "object",
-          );
-          if (literal) {
+          try {
+            const dynamic = new Set(
+              Object.entries(n.action!.config)
+                .filter(([, value]) => inspectExpressions(value))
+                .map(([key]) => key),
+            );
             const result = def.schema.safeParse(n.action!.config);
             if (!result.success)
-              errors.push(
-                `${label}: ${result.error.issues.map((i) => i.path.join(".") + " " + i.message).join(", ")}`,
-              );
+              for (const issue of result.error.issues) {
+                if (dynamic.has(String(issue.path[0]))) continue;
+                errors.push(
+                  `${label}: ${issue.path.join(".")} ${issue.message}`,
+                );
+              }
+          } catch (error) {
+            errors.push(
+              `${label}: ${error instanceof Error ? error.message : String(error)}`,
+            );
           }
           if (n.retries && !def.idempotent && !n.retrySafe)
             errors.push(
@@ -142,7 +146,11 @@ export function validateWorkflow(
             !ref ||
             Array.isArray(ref) ||
             typeof ref !== "object" ||
-            typeof ref.$ref !== "string"
+            !(
+              typeof ref.$ref === "string" ||
+              Array.isArray(ref.$ref) ||
+              Array.isArray(ref.$template)
+            )
           )
             errors.push(`${label}: use a workflow choice or data reference`);
         }
@@ -160,7 +168,11 @@ export function validateWorkflow(
           !ref ||
           Array.isArray(ref) ||
           typeof ref !== "object" ||
-          typeof ref.$ref !== "string"
+          !(
+            typeof ref.$ref === "string" ||
+            Array.isArray(ref.$ref) ||
+            Array.isArray(ref.$template)
+          )
         )
           errors.push(`${label}: missing subflow reference`);
       }
