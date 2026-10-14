@@ -79,6 +79,162 @@ async function saved(page: Page) {
   ).toBeVisible();
 }
 
+test("change profile searches deck-scoped names, saves IDs and navigates after relaunch", async () => {
+  let page = await launch();
+  await seed(page);
+  await page
+    .getByRole("button", { name: "Change profile", exact: true })
+    .click();
+  const trigger = page.getByRole("button", { name: /^Target profile:/ });
+  await expect(trigger).toHaveText("Choose profile");
+  await expect(page.getByRole("textbox", { name: "Profile ID" })).toHaveCount(
+    0,
+  );
+  await trigger.click();
+  const search = page.getByRole("combobox", { name: "Search profiles" });
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveCount(55);
+  await expect(
+    page.getByRole("listbox").getByRole("option", { name: /Other deck only/ }),
+  ).toHaveCount(0);
+  await search.fill("dUpLiCaTe profile");
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveCount(2);
+  await search.press("ArrowDown");
+  await search.press("Enter");
+  await expect(trigger).toHaveText("Duplicate profile");
+  await expect(trigger).toBeFocused();
+  await saved(page);
+  await expect
+    .poll(async () => {
+      const doc = (await page.evaluate(() => window.decker.snapshot()))
+        .document;
+      return doc.profiles[0].pages[0].keys[0].press;
+    })
+    .toMatchObject({
+      kind: "action",
+      action: { config: { profileId: "profile-52" } },
+    });
+  await app.close();
+  page = await launch();
+  await expect(
+    page.getByRole("button", { name: /^Target profile:/ }),
+  ).toHaveText("Duplicate profile");
+  await page
+    .getByRole("button", { name: "Key 1: Change profile", exact: true })
+    .dblclick();
+  await expect(page.getByRole("button", { name: /^Profile:/ })).toHaveText(
+    "Duplicate profile",
+  );
+  await expect
+    .poll(
+      async () =>
+        (await page.evaluate(() => window.decker.snapshot())).document.decks[0]
+          .activeProfileId,
+    )
+    .toBe("profile-52");
+});
+
+test("change page searches pages and nested folders, preserves missing targets and runs the saved selection", async () => {
+  let page = await launch();
+  await seed(page);
+  await page.evaluate(async () => {
+    const doc = (await window.decker.snapshot()).document;
+    doc.profiles[0].pages.push(
+      { id: "tools", name: "Tools", keys: {} },
+      {
+        id: "folder-a",
+        name: "Duplicate folder",
+        parentId: "page-0",
+        keys: {},
+      },
+      { id: "folder-b", name: "Duplicate folder", parentId: "tools", keys: {} },
+      { id: "nested", name: "Nested folder", parentId: "folder-b", keys: {} },
+    );
+    doc.profiles[1].pages[0].name = "Other profile page";
+    await window.decker.request({ type: "save", document: doc });
+  });
+  await page
+    .getByRole("button", { name: "Change page / folder", exact: true })
+    .click();
+  const trigger = page.getByRole("button", { name: /^Page \/ folder:/ });
+  await expect(trigger).toHaveText("Choose page or folder");
+  await expect(page.getByRole("textbox", { name: "Page ID" })).toHaveCount(0);
+  await trigger.click();
+  const search = page.getByRole("combobox", {
+    name: "Search pages and folders",
+  });
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveCount(5);
+  await expect(
+    page
+      .getByRole("listbox")
+      .getByRole("option", { name: /Other profile page/ }),
+  ).toHaveCount(0);
+  await search.fill("no match");
+  await expect(page.getByRole("status")).toHaveText("No results");
+  await search.press("Enter");
+  await expect(search).toBeFocused();
+  await search.fill("Duplicate folder");
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveCount(2);
+  await page
+    .getByRole("listbox")
+    .getByRole("option", { name: /Folder in Tools.*ID: folder-b/ })
+    .click();
+  await expect(trigger).toHaveText("Duplicate folder");
+  await expect(search).toHaveCount(0);
+  await saved(page);
+  await page.evaluate(async () => {
+    const doc = (await window.decker.snapshot()).document;
+    doc.profiles[0].pages.find((p) => p.id === "folder-b")!.name =
+      "Renamed folder";
+    await window.decker.request({ type: "save", document: doc });
+  });
+  await expect(trigger).toHaveText("Renamed folder");
+  await page.evaluate(async () => {
+    const doc = (await window.decker.snapshot()).document;
+    doc.profiles[0].pages = doc.profiles[0].pages.filter(
+      (p) => p.id !== "folder-b" && p.id !== "nested",
+    );
+    await window.decker.request({ type: "save", document: doc });
+  });
+  await expect(trigger).toHaveText(
+    "Page / folder unavailable — choose a replacement",
+  );
+  await expect
+    .poll(async () => {
+      const doc = (await page.evaluate(() => window.decker.snapshot()))
+        .document;
+      return doc.profiles[0].pages[0].keys[0].press;
+    })
+    .toMatchObject({
+      kind: "action",
+      action: { config: { pageId: "folder-b" } },
+    });
+  await trigger.click();
+  await search.fill("Tools");
+  await search.press("Escape");
+  await expect(trigger).toHaveText(
+    "Page / folder unavailable — choose a replacement",
+  );
+  await trigger.click();
+  await search.fill("Duplicate folder");
+  await search.press("Enter");
+  await saved(page);
+  await app.close();
+  page = await launch();
+  await expect(
+    page.getByRole("button", { name: /^Page \/ folder:/ }),
+  ).toHaveText("Duplicate folder");
+  await page
+    .getByRole("button", { name: "Key 1: Change page / folder", exact: true })
+    .dblclick();
+  await expect
+    .poll(
+      async () =>
+        (await page.evaluate(() => window.decker.snapshot())).document.decks[0]
+          .activePageId,
+    )
+    .toBe("folder-a");
+});
+
 test("55 flows stay compact, support keyboard search and duplicates, and create/rename/switch/relaunch", async () => {
   let page = await launch();
   const ids = await seed(page);
