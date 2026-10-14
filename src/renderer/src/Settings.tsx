@@ -5,7 +5,6 @@ import {
   Plus,
   ShieldCheck,
   Upload,
-  Usb,
   Trash2,
 } from "lucide-react";
 import { useApp } from "./store";
@@ -14,6 +13,7 @@ import { Diagnostics } from "./Diagnostics";
 import { Runs } from "./Runs";
 import { PairingApprovals } from "./DeckManager";
 import { FieldLabel } from "./components";
+import "./settings-navigation.css";
 const accents = [
   "#5865f2",
   "#9b59b6",
@@ -41,7 +41,7 @@ function GeneralSettings() {
         </div>
       </div>
       <div className="settings-layout">
-        <section className="settings-card appearance-card">
+        <section className="settings-card appearance-card full-width">
           <div className="card-heading">
             <div>
               <h2>Appearance</h2>
@@ -97,44 +97,6 @@ function GeneralSettings() {
               readOnly
             />
           </FieldLabel>
-        </section>
-        <section className="settings-card">
-          <div className="card-heading">
-            <div>
-              <h2>Devices</h2>
-              <p>Your connected decks and software simulator.</p>
-            </div>
-            <Usb size={22} />
-          </div>
-          {snapshot!.devices.map((device) => (
-            <div className="device-row" key={device.id}>
-              <span className="device-mini">▦</span>
-              <div>
-                <strong>{device.name}</strong>
-                <small>
-                  {device.rows} × {device.columns} · {device.iconSize}px ·{" "}
-                  {device.simulated ? "Software device" : device.id}
-                </small>
-              </div>
-              <span className="status-dot" />
-            </div>
-          ))}
-          {doc.decks.map((deck) => (
-            <button
-              className="wide"
-              key={deck.id}
-              onClick={() => {
-                void request({ type: "selectDeck", deckId: deck.id });
-                useApp.getState().setTab("deck");
-              }}
-            >
-              {deck.icon} {deck.name} · {deck.kind}
-            </button>
-          ))}
-          <p className="muted small">
-            Choose a deck in the sidebar to change its icon, layout, profiles
-            and device settings.
-          </p>
         </section>
         <section className="settings-card full-width">
           <div className="card-heading">
@@ -386,30 +348,27 @@ export function Settings() {
   const { settingsSection: section, setSettingsSection: setSection } = useApp();
   return (
     <div className="settings-workspace">
-      <aside className="secondary-sidebar">
+      <nav
+        className="secondary-sidebar settings-navigation"
+        aria-label="Settings sections"
+      >
         <div className="section-heading">SETTINGS</div>
         {[
           { id: "general", name: "General" },
           { id: "web", name: "Web decks" },
           { id: "diagnostics", name: "Diagnostics" },
+          { id: "runs", name: "Run history" },
         ].map((item) => (
           <button
             key={item.id}
-            className={`profile-item ${section === item.id || (item.id === "diagnostics" && section === "runs") ? "active" : ""}`}
+            className={`profile-item ${section === item.id ? "active" : ""}`}
+            aria-current={section === item.id ? "page" : undefined}
             onClick={() => setSection(item.id as typeof section)}
           >
             {item.name}
           </button>
         ))}
-        {(section === "diagnostics" || section === "runs") && (
-          <button
-            className={`profile-item subnav-item ${section === "runs" ? "active" : ""}`}
-            onClick={() => setSection("runs")}
-          >
-            Run history
-          </button>
-        )}
-      </aside>
+      </nav>
       {section === "general" ? (
         <GeneralSettings />
       ) : section === "web" ? (
