@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { z } from "zod";
 import { appearanceSchema } from "../shared/schema";
 import { Images } from "./images";
+import { accessProbe, probeDeviceAccess } from "../adapters/linux/diagnostics";
+import { hardwareIdentity } from "./session";
 import { DeviceSessions } from "./session";
 
 const port = process.parentPort!,
@@ -15,7 +17,19 @@ let driver: Promise<typeof import("@elgato-stream-deck/node")> | undefined;
 const native = () => (driver ??= import("@elgato-stream-deck/node"));
 const sessions = new DeviceSessions(
   {
-    discover: async () => (await native()).listStreamDecks(),
+    discover: async () => {
+      const discovered = await (await native()).listStreamDecks();
+      if (process.platform === "linux") {
+        const evidence = await Promise.all(
+          discovered.map(async (info) => [
+            hardwareIdentity(info),
+            await probeDeviceAccess(info.path, info.model, accessProbe),
+          ]),
+        );
+        send({ type: "hardwareAccess", value: Object.fromEntries(evidence) });
+      }
+      return discovered;
+    },
     open: async (path) => (await native()).openStreamDeck(path),
     permissionDenied: async (path) => {
       if (process.platform !== "linux") return false;

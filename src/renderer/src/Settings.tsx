@@ -3,7 +3,6 @@ import {
   Check,
   Download,
   Plus,
-  RefreshCw,
   ShieldCheck,
   Upload,
   Usb,
@@ -11,6 +10,7 @@ import {
 } from "lucide-react";
 import { useApp } from "./store";
 import { uid } from "../../shared/defaults";
+import { Diagnostics } from "./Diagnostics";
 import { Runs } from "./Runs";
 import { PairingApprovals } from "./DeckManager";
 import { FieldLabel } from "./components";
@@ -419,67 +419,6 @@ export function Settings() {
       ) : (
         <Diagnostics />
       )}
-    </div>
-  );
-}
-function Diagnostics() {
-  const { snapshot, request, setSettingsSection } = useApp();
-  return (
-    <div className="settings-screen">
-      <div className="page-heading">
-        <div>
-          <div className="eyebrow">DIAGNOSTICS</div>
-          <h1>Understand your workspace.</h1>
-          <p>Integration availability and execution history.</p>
-        </div>
-        <button onClick={() => setSettingsSection("runs")}>
-          Open run history
-        </button>
-      </div>
-      <div className="settings-layout">
-        <section className="settings-card full-width">
-          <div className="card-heading">
-            <div>
-              <h2>Linux capabilities</h2>
-              <p>
-                Availability is checked against the current desktop session.
-              </p>
-            </div>
-            <button onClick={() => void request({ type: "diagnose" })}>
-              <RefreshCw size={15} /> Recheck
-            </button>
-          </div>
-          <div className="capabilities">
-            {snapshot!.capabilities.length ? (
-              snapshot!.capabilities.map((c) => (
-                <div className="capability" key={c.id}>
-                  <span
-                    className={`status-dot ${c.available ? "" : "unavailable"}`}
-                  />
-                  <div>
-                    <strong>{c.id}</strong>
-                    <p>{c.detail}</p>
-                  </div>
-                  <span className="tag">
-                    {c.available ? "Available" : "Unavailable"}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <p className="muted">Checking desktop services…</p>
-            )}
-          </div>
-          <details>
-            <summary>Observed integration state</summary>
-            <pre>{JSON.stringify(snapshot!.observed, null, 2)}</pre>
-          </details>
-          <p className="muted small">
-            Keyboard input currently requires X11. MPRIS uses the session bus.
-            Install xdotool and PipeWire/PulseAudio tools for desktop controls.
-            USB setup is documented in README.
-          </p>
-        </section>
-      </div>
     </div>
   );
 }

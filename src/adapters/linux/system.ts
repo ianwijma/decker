@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { execa } from "execa";
 import dbus from "dbus-next";
+import { desktopProbe } from "./diagnostics";
 import type { Capability, Json } from "../../shared/schema";
 export async function command(
   executable: string,
@@ -56,60 +57,7 @@ export async function command(
   });
 }
 export async function probe(): Promise<Capability[]> {
-  const check = async (cmd: string, args: string[]) => {
-    try {
-      await execa(cmd, args, { timeout: 2000 });
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  const x11 =
-    process.env.XDG_SESSION_TYPE === "x11" ||
-    (!process.env.WAYLAND_DISPLAY && Boolean(process.env.DISPLAY));
-  const [keyboard, wpctl, pactl] = await Promise.all([
-    check("xdotool", ["version"]),
-    check("wpctl", ["status"]),
-    check("pactl", ["info"]),
-  ]);
-  let media = false;
-  try {
-    media = (await players()).length > 0;
-  } catch {
-    /* unavailable bus */
-  }
-  return [
-    {
-      id: "keyboard",
-      available: x11 && keyboard,
-      detail: x11
-        ? keyboard
-          ? "X11 · xdotool ready"
-          : "Install xdotool to send keyboard input"
-        : "Wayland input injection is not supported; use an X11 session",
-    },
-    {
-      id: "audio",
-      available: wpctl || pactl,
-      detail: wpctl
-        ? "PipeWire · wpctl ready"
-        : pactl
-          ? "PulseAudio · pactl ready"
-          : "No responding wpctl/pactl service. Start PipeWire or PulseAudio.",
-    },
-    {
-      id: "media",
-      available: media,
-      detail: media
-        ? "MPRIS player available"
-        : "No MPRIS player on the session bus. Start a supported media player.",
-    },
-    {
-      id: "obs",
-      available: false,
-      detail: "Configure an OBS WebSocket connection in Settings.",
-    },
-  ];
+  return desktopProbe(players);
 }
 async function busCall<T>(
   fn: (bus: ReturnType<typeof dbus.sessionBus>) => Promise<T>,

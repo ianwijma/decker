@@ -1,0 +1,40 @@
+.diagnostics-screen .diagnostic-records {
+  display: grid;
+  gap: 16px;
+  margin: 16px 0;
+}
+.diagnostics-screen .diagnostic-record {
+  padding: 16px;
+  border: 1px solid #404249;
+  border-radius: 12px;
+}
+.diagnostics-screen .diagnostic-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.diagnostics-screen .diagnostic-heading h3 {
+  margin: 0;
+}
+.diagnostics-screen .diagnostic-record p {
+  line-height: 1.6;
+}
+.diagnostics-screen pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow: auto;
+}
+.diagnostics-screen .health-unavailable {
+  border-left: 3px solid #ed4245;
+}
+.diagnostics-screen .health-degraded {
+  border-left: 3px solid #f0b232;
+}
+.diagnostics-screen .row {
+  flex-wrap: wrap;
+}
+.diagnostics-screen details {
+  margin-top: 12px;
+}
