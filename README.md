@@ -83,7 +83,7 @@ npm run package
 DECKER_EXECUTABLE=release/linux-unpacked/decker xvfb-run --auto-servernum npm run test:e2e
 ```
 
-Produces `.deb` and AppImage under `release/`. The lockfile pins stable dependency resolutions. `node-hid` and `sharp` ship ABI-stable Node-API prebuilds, so no Electron header rebuild is needed. Native binaries are unpacked from ASAR; CI loads them from the packaged Electron workers and runs the same UI/runtime smoke tests against the package.
+Produces `.deb` and AppImage under `release/`. Both packaging scripts explicitly disable publishing, so CI builds artifacts without requiring `GH_TOKEN` or creating GitHub releases. The lockfile pins stable dependency resolutions. `node-hid` and `sharp` ship ABI-stable Node-API prebuilds, so no Electron header rebuild is needed. Native binaries are unpacked from ASAR; CI loads them from the packaged Electron workers and runs the same UI/runtime smoke tests against the package.
 
 See [acceptance coverage and manual checks](docs/ACCEPTANCE.md) for verification boundaries. Physical HID operation, unplug/replug, suspend/resume, Pop!_OS and Wayland session behaviour require host testing; simulator and CI results do not establish those hardware gates. Latency targets in REQUIREMENTS.md remain measurement targets.
 

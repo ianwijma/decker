@@ -15,8 +15,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "check": "npm run typecheck && npm test && npm run build",
-    "package": "npm run build && electron-builder --linux deb AppImage",
-    "package:dir": "npm run build && electron-builder --dir",
+    "package": "npm run build && electron-builder --linux deb AppImage --publish never",
+    "package:dir": "npm run build && electron-builder --dir --publish never",
     "postinstall": "install-electron && node scripts/native-check.cjs",
     "format": "prettier --write src tests scripts *.ts *.json .github/workflows/*.yml",
     "format:check": "prettier --check src tests scripts *.ts *.json .github/workflows/*.yml"
