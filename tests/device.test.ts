@@ -85,6 +85,23 @@ describe("simulated deck", () => {
     expect(a).toBe(b);
     expect(a.length).toBe(96 * 96 * 3);
   });
+  it("does not reuse a cached image for different asset bytes", async () => {
+    const sharp = (await import("sharp")).default;
+    const images = new Images(),
+      appearance = binding("desktop.copy").appearance;
+    const asset = async (background: string) =>
+      sharp({
+        create: { width: 96, height: 96, channels: 3, background },
+      })
+        .png()
+        .toBuffer();
+    const red = await asset("#ff0000"),
+      blue = await asset("#0000ff");
+    const a = await images.render(appearance, 96, red);
+    const b = await images.render(appearance, 96, blue);
+    expect(a.equals(b)).toBe(false);
+    expect(await images.render(appearance, 96, red)).toBe(a);
+  });
 });
 
 it("derives mute and scene feedback from observed state only", async () => {

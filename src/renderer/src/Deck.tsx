@@ -16,6 +16,7 @@ import { keySlot, visibleSlot } from "../../shared/decks";
 import { DeckOptions, WebConnect } from "./DeckManager";
 import { binding, uid } from "../../shared/defaults";
 import { observedAppearance } from "../../shared/feedback";
+import { deviceStatusLabel } from "../../shared/device-status";
 import { actionById } from "../../shared/catalog";
 import type { KeyBinding } from "../../shared/schema";
 import { Catalog, FieldLabel, TargetEditor } from "./components";
@@ -157,18 +158,30 @@ export function Deck() {
             <p>Build a workspace that works the way you do.</p>
           </div>
           <span className="tag">
-            <span className="status-dot" />
+            {(deck.kind !== "hardware" || device?.state === "ready") && (
+              <span className="status-dot" />
+            )}
             {deck.kind === "web"
               ? snapshot!.web.running
                 ? "Web deck ready"
                 : "Sharing paused"
               : deck.kind === "simulator"
                 ? "Simulator mode"
-                : device?.connected
-                  ? "Connected"
-                  : "Disconnected"}
+                : deviceStatusLabel(device)}
           </span>
         </div>
+        {deck.kind === "hardware" && device?.error && (
+          <div role="status">
+            <p>{device.error}</p>
+            <button
+              onClick={() =>
+                void request({ type: "retryDevice", hardwareId: device.id })
+              }
+            >
+              Retry device
+            </button>
+          </div>
+        )}
         <div className="deck-toolbar">
           <span className="inline-label">
             {deck.icon} <strong>{deck.name}</strong>

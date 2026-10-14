@@ -246,12 +246,35 @@ export type DeviceStatus = {
   id: string;
   name: string;
   connected: boolean;
+  // Presence is discovery evidence; connected is retained as a ready-only alias.
+  present: boolean;
+  configured: boolean;
+  state: DeviceState;
+  updatedAt: number;
+  // Completion of a driver write, not physical display readback.
+  lastSuccessfulWriteAt?: number;
+  errorDetails?: {
+    stage: "open" | "write" | "discovery";
+    message: string;
+    code?: string;
+    errno?: number;
+    at: number;
+  };
   simulated: boolean;
   rows: number;
   columns: number;
   iconSize: number;
   error?: string;
 };
+export type DeviceState =
+  | "discovered"
+  | "opening"
+  | "ready"
+  | "permission-denied"
+  | "busy"
+  | "open-error"
+  | "io-error"
+  | "disconnected";
 export type Snapshot = {
   document: AppDocument;
   runs: RunRecord[];
@@ -297,6 +320,7 @@ export const requestSchema = z.discriminatedUnion("type", [
     persist: z.boolean(),
   }),
   z.object({ type: z.literal("diagnose") }),
+  z.object({ type: z.literal("retryDevice"), hardwareId: id }),
   z.object({ type: z.literal("clearHistory") }),
   z.object({ type: z.literal("selectDeck"), deckId: id }),
   z.object({
