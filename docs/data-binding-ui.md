@@ -118,6 +118,8 @@ Ordinal duplicate-name labels can change on reorder; reference identity remains
 stable. History cannot promise complete data or a dynamic output schema.
 
 Host acceptance remains pending for physical Stream Deck, actual OBS,
-OS keyring and real desktop notifications. After PR09/PR12 merge, rerun the
-named OBS selector with binding modes and button/workflow palette checks.
-PR16 leaves those owners' regions and packaging/release gates untouched.
+OS keyring and real desktop notifications. The combined Electron regressions
+cover the named OBS selector with binding modes and button/workflow palettes
+after the PR09/PR12 merges. PR16 preserves those owners' regions and the
+packaging/release gates. CI regression fixes wait for the committed uploaded
+asset and the runner readiness handshake; existing assertions remain intact.

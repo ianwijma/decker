@@ -190,6 +190,7 @@ test("named choices disambiguate duplicates in buttons and workflow fields, reta
     };
     d.profiles[0].pages[0].keys[0].press = { kind: "action", action };
     const workflow = d.workflows[0];
+    workflow.inputs = ["connection"];
     const node = structuredClone(workflow.graph.nodes[0]);
     node.id = "obs-choice";
     node.kind = "action";
@@ -217,6 +218,33 @@ test("named choices disambiguate duplicates in buttons and workflow fields, reta
   await choice.click();
   await page.getByRole("option", { name: /Studio \(1\)/ }).click();
   await expect(choice).toHaveText("Studio (1)");
+  const mode = page.getByRole("combobox", {
+    name: "OBS connection value mode",
+    exact: true,
+  });
+  await mode.selectOption("reference");
+  await page.getByRole("button", { name: /^Data for OBS connection:/ }).click();
+  await page
+    .getByRole("combobox", {
+      name: "Search data for OBS connection",
+      exact: true,
+    })
+    .fill("Inputs / connection");
+  await page
+    .getByRole("combobox", {
+      name: "Search data for OBS connection",
+      exact: true,
+    })
+    .press("Enter");
+  await page
+    .getByRole("button", {
+      name: "Insert reference for OBS connection",
+      exact: true,
+    })
+    .click();
+  await expect(choice).toHaveCount(0);
+  await mode.selectOption("literal");
+  await expect(choice).toHaveText("Studio (1)");
   await page.evaluate(async () => {
     const d = (await window.decker.snapshot()).document;
     d.workflows[0].graph.nodes[0].action!.config.connectionId = {
@@ -225,6 +253,7 @@ test("named choices disambiguate duplicates in buttons and workflow fields, reta
     };
     await window.decker.request({ type: "save", document: d });
   });
+  await page.getByText("OBS connection advanced JSON", { exact: true }).click();
   await expect(
     page.getByRole("textbox", { name: "OBS connection binding", exact: true }),
   ).toHaveValue(/inputs.connection/);
