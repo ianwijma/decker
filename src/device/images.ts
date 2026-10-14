@@ -22,6 +22,7 @@ export class Images {
   ): Promise<Buffer> {
     const key = createHash("sha256")
       .update(JSON.stringify([appearance, size]))
+      .update(asset ?? Buffer.alloc(0))
       .digest("hex");
     const cached = this.cache.get(key);
     if (cached) return cached;

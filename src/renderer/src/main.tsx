@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useApp } from "./store";
 import { Deck } from "./Deck";
+import { deviceStatusLabel } from "../../shared/device-status";
 const Flows = lazy(() =>
   import("./Flows").then((module) => ({ default: module.Flows })),
 );
@@ -92,21 +93,22 @@ function App() {
         <div className="rail-divider" />
         <div className="deck-rail-list">
           {snapshot.document.decks.map((deck) => {
+            const hardware = snapshot.devices.find(
+              (d) => d.id === deck.hardwareId,
+            );
             const online =
               deck.kind === "simulator" ||
               (deck.kind === "web"
                 ? snapshot.web.clients.some(
                     (c) => c.deckId === deck.id && c.online,
                   )
-                : snapshot.devices.some(
-                    (d) => d.id === deck.hardwareId && d.connected,
-                  ));
+                : hardware?.state === "ready");
             return (
               <button
                 key={deck.id}
                 className={`rail-item deck-rail-item ${tab === "deck" && snapshot.document.activeDeckId === deck.id ? "active" : ""}`}
                 aria-label={`Deck: ${deck.name}`}
-                title={`${deck.name} · ${deck.kind} · ${online ? "connected" : "offline"}`}
+                title={`${deck.name} · ${deck.kind} · ${deck.kind === "hardware" ? deviceStatusLabel(hardware) : online ? "connected" : "offline"}`}
                 onClick={() => {
                   void request({ type: "selectDeck", deckId: deck.id });
                   setTab("deck");

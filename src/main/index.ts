@@ -93,6 +93,10 @@ const snapshot = (): Snapshot => ({
         id: d.id,
         name: d.name,
         connected: true,
+        present: true,
+        configured: true,
+        state: "ready" as const,
+        updatedAt: Date.now(),
         simulated: true,
         rows: d.rows,
         columns: d.columns,
@@ -270,6 +274,9 @@ function configureDevice() {
       .map((deck) => ({
         deckId: deck.id,
         hardwareId: deck.hardwareId,
+        name: deck.name,
+        rows: deck.rows,
+        columns: deck.columns,
         brightness: deck.brightness,
         page: Object.fromEntries(
           Object.entries(deckAppearance(deck.id)).map(([key, appearance]) => [
@@ -433,7 +440,8 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
       }
       if (name === "device") {
         if (message.type === "nativeReady") {
-          observed.hardwareNativeReady = true;
+          observed.hardwareNativeReady = message.ready;
+          if (message.error) diagnostic(message.error);
           publish();
         } else if (message.type === "devices") {
           devices = message.devices;
@@ -442,7 +450,7 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
           )) {
             const found = devices.find((d) => d.id === deck.hardwareId);
             if (
-              found &&
+              found?.present &&
               (deck.rows !== found.rows || deck.columns !== found.columns)
             ) {
               deck.rows = found.rows;
@@ -574,7 +582,14 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
     if (quitting) return;
     if (name === "device") {
       for (const device of devices) triggers.disconnect(device.id);
-      devices = [];
+      observed.hardwareNativeReady = false;
+      devices = devices.map((device) => ({
+        ...device,
+        connected: false,
+        state: "io-error",
+        updatedAt: Date.now(),
+        error: "Device service exited; readiness is unknown",
+      }));
     } else if (name === "runner") {
       runs = runs.map((r) =>
         r.status === "running"
@@ -724,9 +739,9 @@ async function handle(raw: unknown) {
         columns = request.columns;
       if (request.kind === "hardware") {
         const found = devices.find((d) => d.id === request.hardwareId);
-        if (!found || found.id.startsWith("session:"))
+        if (!found?.present || found.id.startsWith("session:"))
           throw new Error(
-            "Hardware needs a stable serial number and must be connected",
+            "Hardware needs a stable serial number and must be detected",
           );
         if (document.decks.some((d) => d.hardwareId === found.id))
           throw new Error("This Stream Deck is already configured");
@@ -808,6 +823,13 @@ async function handle(raw: unknown) {
       else await shell.openExternal(request.url);
       return null;
     }
+    case "retryDevice":
+      if (
+        !document.decks.some((deck) => deck.hardwareId === request.hardwareId)
+      )
+        throw new Error("Hardware deck is not configured");
+      post("device", { type: "refresh", id: request.hardwareId });
+      return null;
     case "diagnose":
       post("runner", { type: "diagnose" });
       post("device", { type: "refresh" });
