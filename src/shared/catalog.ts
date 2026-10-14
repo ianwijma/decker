@@ -24,6 +24,7 @@ export type Field = {
     | "boolean"
     | "select"
     | "secret"
+    | "connection"
     | "workflow"
     | "file"
     | "json";
@@ -294,7 +295,7 @@ const definitions: Omit<
     description: "Scenes, sources, input mute, streaming and recording.",
     capabilities: ["obs"],
     fields: [
-      f("connectionId", "Connection ID", "obs"),
+      f("connectionId", "OBS connection", "", "connection"),
       f("operation", "Operation", "scene", "select", [
         "scene",
         "source",

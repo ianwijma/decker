@@ -19,13 +19,16 @@ test.beforeEach(async () => {
   });
   page = await app.firstWindow();
   await page.getByRole("button", { name: "Deck: My XL", exact: true }).click();
+  // OBS capability exists before startup; keyboard diagnostics come from runner.
   await expect
     .poll(() =>
-      page.evaluate(
-        async () => (await window.decker.snapshot()).capabilities.length,
+      page.evaluate(async () =>
+        (await window.decker.snapshot()).capabilities.some(
+          (c) => c.id === "keyboard",
+        ),
       ),
     )
-    .toBeGreaterThan(0);
+    .toBe(true);
 });
 test.afterEach(async () => {
   await app?.close();

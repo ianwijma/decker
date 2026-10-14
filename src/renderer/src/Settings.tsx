@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { Check, Download, Plus, Upload, Trash2 } from "lucide-react";
+import { Check, Download, Plus, Upload } from "lucide-react";
 import { useApp } from "./store";
-import { uid } from "../../shared/defaults";
 import { Diagnostics } from "./Diagnostics";
 import { Runs } from "./Runs";
 import { PairingApprovals } from "./DeckManager";
 import { FieldLabel } from "./components";
 import "./settings-navigation.css";
-import { InlineSecret, ActionSecretOwners } from "./InlineSecret";
+import { ActionSecretOwners } from "./InlineSecret";
+import { ObsSettings } from "./ObsSettings";
 const accents = [
   "#5865f2",
   "#9b59b6",
@@ -88,95 +88,7 @@ function GeneralSettings() {
             />
           </FieldLabel>
         </section>
-        <section className="settings-card full-width">
-          <div className="card-heading">
-            <div>
-              <h2>Connections</h2>
-              <p>Connect OBS Studio through its WebSocket server.</p>
-            </div>
-            <button
-              onClick={() =>
-                edit((d) => {
-                  d.connections.push({
-                    id: uid(),
-                    name: "OBS Studio",
-                    url: "ws://127.0.0.1:4455",
-                  });
-                })
-              }
-            >
-              <Plus size={15} /> Add OBS
-            </button>
-          </div>
-          {doc.connections.length === 0 && (
-            <p className="muted">
-              No connections yet. Enable the WebSocket server in OBS → Tools.
-            </p>
-          )}
-          {doc.connections.map((c) => (
-            <div className="connection" key={c.id}>
-              <div className="row">
-                <strong>{c.name}</strong>
-                <span className="tag">
-                  {(
-                    snapshot!.observed[`obs:${c.id}`] as { connected?: boolean }
-                  )?.connected
-                    ? "Connected"
-                    : "Disconnected"}
-                </span>
-                <button
-                  className="icon-button"
-                  aria-label={`Delete ${c.name}`}
-                  onClick={() =>
-                    edit((d) => {
-                      d.connections = d.connections.filter(
-                        (x) => x.id !== c.id,
-                      );
-                    })
-                  }
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-              <div className="three-columns">
-                <FieldLabel label="Connection name">
-                  <input
-                    value={c.name}
-                    onChange={(e) =>
-                      edit((d) => {
-                        d.connections.find((x) => x.id === c.id)!.name =
-                          e.target.value || "OBS";
-                      })
-                    }
-                  />
-                </FieldLabel>
-                <FieldLabel label="WebSocket URL">
-                  <input
-                    defaultValue={c.url}
-                    onBlur={(e) => {
-                      try {
-                        new URL(e.target.value);
-                        edit((d) => {
-                          d.connections.find((x) => x.id === c.id)!.url =
-                            e.target.value;
-                        });
-                      } catch {
-                        useApp
-                          .getState()
-                          .setError("Enter a valid WebSocket URL");
-                      }
-                    }}
-                  />
-                </FieldLabel>
-                <InlineSecret
-                  owner={JSON.stringify(["connection", c.id])}
-                  label="OBS password"
-                />
-              </div>
-              <small className="muted code">Connection ID: {c.id}</small>
-            </div>
-          ))}
-        </section>
+        <ObsSettings />
         <section className="settings-card full-width">
           <ActionSecretOwners />
         </section>

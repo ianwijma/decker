@@ -34,6 +34,9 @@ import { Credentials } from "./credentials";
 import { mutateCredential } from "./credential-mutations";
 import { commitBrightness } from "./brightness";
 import { brightnessActions, preserveBrightness } from "../shared/brightness";
+import { saveObsDraft, testObsRequest } from "./obs-connections";
+import { ObsTests, obsOutcome } from "../integrations/obs-test";
+const obsTests = new ObsTests();
 import {
   credentialOwners,
   rekeyCredentials,
@@ -694,12 +697,30 @@ function enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 function handle(raw: unknown) {
-  const request = requestSchema.parse(raw);
+  const parsed = requestSchema.safeParse(raw);
+  if (
+    !parsed.success &&
+    raw &&
+    typeof raw === "object" &&
+    (raw as { type?: unknown }).type === "obsTest"
+  )
+    return Promise.resolve(obsOutcome("", "invalid-input"));
+  if (
+    !parsed.success &&
+    raw &&
+    typeof raw === "object" &&
+    (raw as { type?: unknown }).type === "obsSave"
+  )
+    throw new Error(
+      "Invalid OBS draft. Check the name, WebSocket URL and password choice.",
+    );
+  const request = parsed.success ? parsed.data : requestSchema.parse(raw);
   // Only document mutations share this queue. Cancellation and runner requests
   // remain responsive while storage or a native dialog is pending.
   return [
     "save",
     "credential",
+    "obsSave",
     "import",
     "addDeck",
     "deleteDeck",
@@ -927,6 +948,33 @@ async function handleRequest(request: Request) {
       persist();
       publish();
       return null;
+    case "obsTest":
+      return testObsRequest(
+        request,
+        () => ({ document, epoch: credentialEpoch }),
+        credentials,
+        obsTests,
+      );
+    case "obsHelp":
+      await shell.openExternal(
+        "https://obsproject.com/kb/remote-control-guide",
+      );
+      return null;
+    case "obsCancel":
+      obsTests.cancel(request.id);
+      return null;
+    case "obsSave": {
+      document = await saveObsDraft(
+        document,
+        credentialEpoch,
+        request,
+        credentials,
+        (next) => store.save(next, runs),
+      );
+      credentialEpoch = uid();
+      configure();
+      return snapshot();
+    }
     case "credential": {
       document = await mutateCredential(
         document,
@@ -1055,7 +1103,15 @@ function createWindow() {
   window.webContents.session.setPermissionRequestHandler(
     (_webContents, _permission, callback) => callback(false),
   );
+  window.webContents.on("render-process-gone", () => obsTests.close());
+  window.webContents.on(
+    "did-start-navigation",
+    (_event, _url, _inPlace, mainFrame) => {
+      if (mainFrame) obsTests.close();
+    },
+  );
   window.on("close", (event) => {
+    obsTests.close();
     if (!quitting && document.settings.closeToTray && tray) {
       event.preventDefault();
       window?.hide();
@@ -1153,6 +1209,7 @@ app.on("before-quit", (event) => {
   if (quitting) return;
   event.preventDefault();
   quitting = true;
+  obsTests.close();
   triggers.disconnect();
   for (const name of workers.keys()) post(name, { type: "stop" });
   clearTimeout(persistTimer);

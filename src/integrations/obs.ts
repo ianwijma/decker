@@ -1,4 +1,5 @@
-import OBSWebSocket from "obs-websocket-js";
+import type OBSWebSocket from "obs-websocket-js/json";
+import { DisposableObsClient } from "./obs-client";
 import { withCancellation } from "../runtime/cancellation";
 import type { AppDocument, Json } from "../shared/schema";
 export class ObsConnections {
@@ -9,73 +10,89 @@ export class ObsConnections {
     this.state.set(id, value);
     this.observe(id, value);
   }
-  private clients = new Map<string, OBSWebSocket>();
-  private connecting = new Map<string, Promise<OBSWebSocket>>();
-  constructor(private observe: (id: string, value: Json) => void) {}
+  private sessions = new Map<
+    string,
+    {
+      client: DisposableObsClient;
+      signature: string;
+      abort: AbortController;
+      promise: Promise<OBSWebSocket>;
+    }
+  >();
+  constructor(
+    private observe: (id: string, value: Json) => void,
+    private create: () => DisposableObsClient = () => new DisposableObsClient(),
+  ) {}
   async get(
     connection: AppDocument["connections"][number],
     password?: string,
   ): Promise<OBSWebSocket> {
-    const existing = this.clients.get(connection.id);
-    if (existing) return existing;
-    const pending = this.connecting.get(connection.id);
-    if (pending) return pending;
+    const signature = JSON.stringify([
+      connection.url,
+      connection.credentialRef,
+      password,
+    ]);
+    const old = this.sessions.get(connection.id);
+    if (old?.signature === signature) return old.promise;
+    if (old) {
+      this.sessions.delete(connection.id);
+      this.state.delete(connection.id);
+      this.update(connection.id, { connected: false });
+      old.abort.abort();
+      void old.client.dispose();
+    }
     const generation = this.generation;
-    const promise = (async () => {
-      const client = new OBSWebSocket();
-      client.on("ConnectionClosed", () => {
-        this.clients.delete(connection.id);
-        this.update(connection.id, { connected: false });
-      });
-      client.on("ConnectionError", (error) =>
-        this.update(connection.id, { connected: false, error: error.message }),
-      );
-      client.on("CurrentProgramSceneChanged", (data) =>
-        this.update(connection.id, { connected: true, scene: data.sceneName }),
-      );
-      client.on("InputMuteStateChanged", (data) =>
-        this.update(connection.id, {
-          connected: true,
-          [`mute:${data.inputName}`]: data.inputMuted,
-        }),
-      );
-      client.on("RecordStateChanged", (data) =>
-        this.update(connection.id, {
-          connected: true,
-          recording: data.outputActive,
-        }),
-      );
-      client.on("StreamStateChanged", (data) =>
-        this.update(connection.id, {
-          connected: true,
-          streaming: data.outputActive,
-        }),
-      );
-      client.on("SceneItemEnableStateChanged", (data) =>
-        this.update(connection.id, {
-          connected: true,
-          [`source:${data.sceneName}:${data.sceneItemId}`]:
-            data.sceneItemEnabled,
-        }),
-      );
+    const abort = new AbortController();
+    const client = this.create();
+    const current = () =>
+      generation === this.generation &&
+      this.sessions.get(connection.id)?.client === client;
+    const update = (patch: Record<string, Json>) => {
+      if (current()) this.update(connection.id, patch);
+    };
+    client.on("ConnectionClosed", () => {
+      if (!current()) return;
+      this.sessions.delete(connection.id);
+      this.update(connection.id, { connected: false });
+    });
+    client.on("ConnectionError", () =>
+      update({ connected: false, error: "OBS connection unavailable" }),
+    );
+    client.on("CurrentProgramSceneChanged", (data) =>
+      update({ connected: true, scene: data.sceneName }),
+    );
+    client.on("InputMuteStateChanged", (data) =>
+      update({ connected: true, [`mute:${data.inputName}`]: data.inputMuted }),
+    );
+    client.on("RecordStateChanged", (data) =>
+      update({ connected: true, recording: data.outputActive }),
+    );
+    client.on("StreamStateChanged", (data) =>
+      update({ connected: true, streaming: data.outputActive }),
+    );
+    client.on("SceneItemEnableStateChanged", (data) =>
+      update({
+        connected: true,
+        [`source:${data.sceneName}:${data.sceneItemId}`]: data.sceneItemEnabled,
+      }),
+    );
+    // Start after installing the session so even synchronous client seams are guarded.
+    const promise = Promise.resolve().then(async () => {
       try {
+        if (!current()) throw new Error("OBS configuration changed");
         await withCancellation(
           client.connect(connection.url, password),
-          AbortSignal.timeout(5000),
+          AbortSignal.any([abort.signal, AbortSignal.timeout(5000)]),
           0,
         );
-        if (generation !== this.generation)
-          throw new Error("OBS configuration changed");
-        this.clients.set(connection.id, client);
+        if (!current()) throw new Error("OBS configuration changed");
         const scene = await withCancellation(
           client.call("GetCurrentProgramScene"),
-          AbortSignal.timeout(3000),
+          AbortSignal.any([abort.signal, AbortSignal.timeout(3000)]),
           0,
         );
-        this.update(connection.id, {
-          connected: true,
-          scene: scene.currentProgramSceneName,
-        });
+        if (!current()) throw new Error("OBS configuration changed");
+        update({ connected: true, scene: scene.currentProgramSceneName });
         const observe = async () => {
           const [recording, streaming, inputs, scenes] = await Promise.all([
             client.call("GetRecordStatus"),
@@ -83,25 +100,27 @@ export class ObsConnections {
             client.call("GetInputList"),
             client.call("GetSceneList"),
           ]);
-          this.update(connection.id, {
+          if (!current()) return;
+          update({
             recording: recording.outputActive,
             streaming: streaming.outputActive,
           });
           await Promise.allSettled(
             inputs.inputs.slice(0, 64).map(async (input) => {
+              if (!current()) return;
               const inputName = String(input.inputName);
               const result = await client.call("GetInputMute", { inputName });
-              this.update(connection.id, {
-                [`mute:${inputName}`]: result.inputMuted,
-              });
+              update({ [`mute:${inputName}`]: result.inputMuted });
             }),
           );
           await Promise.allSettled(
             scenes.scenes.slice(0, 64).map(async (scene) => {
-              const sceneName = String(scene.sceneName),
-                result = await client.call("GetSceneItemList", { sceneName });
-              this.update(
-                connection.id,
+              if (!current()) return;
+              const sceneName = String(scene.sceneName);
+              const result = await client.call("GetSceneItemList", {
+                sceneName,
+              });
+              update(
                 Object.fromEntries(
                   result.sceneItems.map((item) => [
                     `source:${sceneName}:${item.sceneItemId}`,
@@ -112,22 +131,25 @@ export class ObsConnections {
             }),
           );
         };
-        void withCancellation(observe(), AbortSignal.timeout(5000), 0).catch(
-          () => {},
-        );
+        void withCancellation(
+          observe(),
+          AbortSignal.any([abort.signal, AbortSignal.timeout(5000)]),
+          0,
+        ).catch(() => {});
         return client;
       } catch (error) {
-        this.clients.delete(connection.id);
-        await client.disconnect().catch(() => {});
+        if (current()) {
+          this.sessions.delete(connection.id);
+          this.update(connection.id, { connected: false });
+        }
+        await client.dispose();
+        if (generation !== this.generation)
+          throw new Error("OBS configuration changed");
         throw error;
       }
-    })();
-    this.connecting.set(connection.id, promise);
-    try {
-      return await promise;
-    } finally {
-      this.connecting.delete(connection.id);
-    }
+    });
+    this.sessions.set(connection.id, { client, signature, abort, promise });
+    return promise;
   }
   async execute(
     connection: AppDocument["connections"][number],
@@ -181,9 +203,18 @@ export class ObsConnections {
   }
   async close() {
     this.generation++;
+    const sessions = [...this.sessions.entries()];
+    this.sessions.clear();
+    this.state.clear();
+    for (const [id, session] of sessions) {
+      session.abort.abort();
+      this.update(id, { connected: false });
+    }
     await Promise.allSettled(
-      [...this.clients.values()].map((client) => client.disconnect()),
+      sessions.map(async ([, session]) => {
+        await session.client.dispose();
+        await session.promise.catch(() => {});
+      }),
     );
-    this.clients.clear();
   }
 }
