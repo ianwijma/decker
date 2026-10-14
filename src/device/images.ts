@@ -1,18 +1,7 @@
 import sharp from "sharp";
 import { createHash } from "node:crypto";
 import type { KeyBinding } from "../shared/schema";
-const escape = (text: string) =>
-  text.replace(
-    /[<>&"']/g,
-    (c) =>
-      ({
-        "<": "&lt;",
-        ">": "&gt;",
-        "&": "&amp;",
-        '"': "&quot;",
-        "'": "&apos;",
-      })[c]!,
-  );
+import { escapeSvg as escape, packKeySvg } from "../shared/icons";
 export class Images {
   private cache = new Map<string, Buffer>();
   async render(
@@ -27,9 +16,10 @@ export class Images {
     const cached = this.cache.get(key);
     if (cached) return cached;
     const label = escape(appearance.label.slice(0, 24)),
-      icon = escape(appearance.icon.slice(0, 4));
+      icon = escape(appearance.icon.slice(0, 4)),
+      pack = packKeySvg(appearance.icon, appearance.label);
     const svg = Buffer.from(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><rect width="100%" height="100%" fill="${appearance.background}"/><text x="50%" y="43%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.3}" fill="white">${icon}</text><text x="50%" y="80%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.12}" fill="white">${label}</text></svg>`,
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><rect width="100%" height="100%" fill="${appearance.background}"/>${pack ?? `<text x="50%" y="43%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.3}" fill="white">${icon}</text><text x="50%" y="80%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.12}" fill="white">${label}</text>`}</svg>`,
     );
     const base = asset
       ? sharp(asset)

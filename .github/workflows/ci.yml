@@ -35,6 +35,8 @@ jobs:
         run: npm run package -- --x64 --config work/nightly/builder.json
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Verify packaged icon geometry and upstream notices
+        run: node scripts/check-icon-packages.ts
       - name: Packaged Electron and native module smoke tests
         run: xvfb-run --auto-servernum npm run test:e2e
         env:

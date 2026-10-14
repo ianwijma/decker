@@ -1,0 +1,63 @@
+.deck-key > .pack-key-visual,
+.selected-key-preview > .pack-key-visual {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+}
+.pack-key-visual svg {
+  width: 100%;
+  height: 100%;
+}
+.pack-key-visual ~ .key-label,
+.pack-key-visual ~ small {
+  display: none;
+}
+.key-icon-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.key-icon-picker > .field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #c4c8d6;
+}
+.key-icon-picker-panel {
+  border: 1px solid #575b68;
+  border-radius: 6px;
+  padding: 8px;
+  background: #1e1f22;
+}
+.key-icon-picker-options {
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+.key-icon-picker-options [role="option"] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.key-icon-picker-options [role="option"].highlighted {
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.key-icon-picker-options [aria-selected="true"] {
+  box-shadow: inset 3px 0 var(--accent);
+}
+.key-icon-picker-options svg {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+.icon-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

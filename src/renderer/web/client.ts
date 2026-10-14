@@ -1,4 +1,5 @@
 import type { WebDeckView } from "../../shared/schema";
+import { packKeySvg } from "../../shared/icons";
 import "./style.css";
 const root = document.getElementById("app")!,
   deckId = decodeURIComponent(location.pathname.split("/")[2] ?? "");
@@ -66,6 +67,27 @@ function offline(message = "Offline · reconnecting…") {
     button.classList.remove("pressed");
   }
 }
+function renderKey(
+  button: HTMLButtonElement,
+  key: WebDeckView["keys"][number] | undefined,
+) {
+  button.replaceChildren();
+  if (key?.asset) {
+    const image = element("img");
+    image.src = `/key-assets/${key.asset}?deck=${encodeURIComponent(deckId)}`;
+    image.alt = "";
+    button.append(image);
+  } else {
+    const svg = packKeySvg(key?.icon ?? "", key?.label ?? "");
+    if (svg) {
+      const icon = element("span", undefined, "pack-key-visual");
+      icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML = svg;
+      button.append(icon);
+    } else button.append(element("span", key?.icon || "✦", "symbol"));
+  }
+  button.append(element("span", key?.label ?? "", "label"));
+}
 function render(next: WebDeckView) {
   const changed =
     !view ||
@@ -91,14 +113,7 @@ function render(next: WebDeckView) {
         ![...pointers.values()].includes(index) &&
         !keyboardHeld.has(index);
       button.setAttribute("aria-label", key?.label || `Empty key ${index + 1}`);
-      button.replaceChildren();
-      if (key?.asset) {
-        const image = element("img");
-        image.src = `/key-assets/${key.asset}?deck=${encodeURIComponent(deckId)}`;
-        image.alt = "";
-        button.append(image);
-      } else button.append(element("span", key?.icon || "✦", "symbol"));
-      button.append(element("span", key?.label ?? "", "label"));
+      renderKey(button, key);
     }
     return;
   }
@@ -118,13 +133,7 @@ function render(next: WebDeckView) {
     button.disabled = !key;
     button.setAttribute("aria-label", key?.label || `Empty key ${index + 1}`);
     button.style.backgroundColor = key?.background ?? "#232428";
-    if (key?.asset) {
-      const image = element("img");
-      image.src = `/key-assets/${key.asset}?deck=${encodeURIComponent(deckId)}`;
-      image.alt = "";
-      button.append(image);
-    } else button.append(element("span", key?.icon || "✦", "symbol"));
-    button.append(element("span", key?.label ?? "", "label"));
+    renderKey(button, key);
     button.addEventListener("pointerdown", (event) => {
       if (!ready || event.button !== 0 || !view?.keys[index]) return;
       event.preventDefault();

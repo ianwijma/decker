@@ -20,6 +20,9 @@ import { actionById } from "../../shared/catalog";
 import type { KeyBinding } from "../../shared/schema";
 import { Catalog, FieldLabel, TargetEditor } from "./components";
 import { SearchableDropdown } from "./SearchableDropdown";
+import { selectIcon } from "../../shared/icons";
+import { KeyIcon } from "./KeyIcon";
+import { IconPicker } from "./IconPicker";
 export function Deck() {
   const { snapshot, edit, request } = useApp(),
     doc = snapshot!.document,
@@ -256,14 +259,17 @@ export function Deck() {
                   {b?.appearance.asset ? (
                     <img alt="" src={`decker-asset://${b.appearance.asset}`} />
                   ) : (
-                    <span className="key-symbol">
-                      {b?.appearance.icon ||
+                    <KeyIcon
+                      icon={b?.appearance.icon ?? ""}
+                      label={b?.appearance.label ?? ""}
+                      fallback={
                         (b?.press?.kind === "action"
                           ? actionById(b.press.action.type)?.icon
                           : b
                             ? "⑂"
-                            : "+")}
-                    </span>
+                            : "+") ?? "✦"
+                      }
+                    />
                   )}
                   <span className="key-label">{b?.appearance.label ?? ""}</span>
                   <span className="key-index">
@@ -463,7 +469,10 @@ export function Deck() {
                   src={`decker-asset://${key.appearance.asset}`}
                 />
               ) : (
-                <span>{key.appearance.icon || "✦"}</span>
+                <KeyIcon
+                  icon={key.appearance.icon}
+                  label={key.appearance.label}
+                />
               )}
               <small>{key.appearance.label}</small>
             </div>
@@ -478,18 +487,12 @@ export function Deck() {
                 }
               />
             </FieldLabel>
+            <IconPicker
+              key={key.id}
+              value={key.appearance.icon}
+              onSelect={(icon) => update((k) => selectIcon(k.appearance, icon))}
+            />
             <div className="two-columns">
-              <FieldLabel label="Icon">
-                <input
-                  aria-label="Icon"
-                  value={key.appearance.icon}
-                  onChange={(e) =>
-                    update((k) => {
-                      k.appearance.icon = e.target.value;
-                    })
-                  }
-                />
-              </FieldLabel>
               <FieldLabel label="Background">
                 <input
                   aria-label="Background"
