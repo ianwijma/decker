@@ -293,9 +293,9 @@ PR21 can extend stage 3 without changing confirmed toggle state or preview
 semantics. No dynamic action/cache/remote image fetch or periodic refresh is
 introduced here. Cancellation/expiry resolves the latest underlying appearance.
 A separate bounded `stateLabel` marker makes on/off/unknown, busy, stale, blocked
-and failed states visible even with uploaded artwork. Desktop selection remains
-`aria-pressed` selection; state descriptions and the dedicated execution control
-carry toggle meaning. Unknown/busy keys remain selectable for configuration.
+and failed states visible even with uploaded artwork. Ordinary desktop selection retains `aria-pressed`; toggle editor selection uses
+`aria-current` to keep it distinct from confirmed on/off state. State descriptions
+and the dedicated execution control carry toggle meaning. Unknown/busy keys remain selectable for configuration.
 Web keys receive only bounded per-key display/accessibility data (confirmation,
 busy/disabled flags, fixed summary), never global records, identities, stamps or
 private probe output. Web press guards retain pointer/keyboard release handling;

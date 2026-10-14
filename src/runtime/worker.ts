@@ -210,14 +210,14 @@ port.on("message", async (event) => {
           JSON.stringify(credentials) !== JSON.stringify(message.credentials);
         document = message.document;
         credentials = message.credentials;
-        if (changed) {
+        if (changed)
           for (const id of Object.keys(observations))
             if (id.startsWith("obs:")) delete observations[id];
-          await obs.close();
-        }
-        if (epoch !== configurationEpoch) break;
+        // Invalidate captured targets immediately, before bounded socket cleanup.
         toggles.configure(document, message.activateToggles);
         toggles.updateObservations(observations);
+        if (changed) await obs.close();
+        if (epoch !== configurationEpoch) break;
         void diagnose();
         break;
       }

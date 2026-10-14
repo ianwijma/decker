@@ -74,7 +74,7 @@ function keyAccessibility(
 ) {
   button.setAttribute(
     "aria-label",
-    `${key?.label || `Empty key ${index + 1}`}${key?.toggle ? ` · ${key.toggle.summary}` : ""}`,
+    `${key?.label || `${key?.toggle ? "Key" : "Empty key"} ${index + 1}`}${key?.toggle ? ` · ${key.toggle.summary}` : ""}`,
   );
   button.setAttribute("aria-busy", String(Boolean(key?.toggle?.busy)));
   if (key?.toggle)

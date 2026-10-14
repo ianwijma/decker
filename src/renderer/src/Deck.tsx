@@ -253,7 +253,10 @@ export function Deck() {
                 <button
                   key={index}
                   aria-label={`Key ${index + 1}${b ? `: ${b.appearance.label}` : ""}${toggle ? ` · ${toggle.summary}` : ""}`}
-                  aria-pressed={selected === index}
+                  aria-pressed={toggle ? undefined : selected === index}
+                  aria-current={
+                    toggle && selected === index ? "true" : undefined
+                  }
                   aria-busy={toggle?.busy || run?.status === "running"}
                   className={`deck-key ${selected === index ? "selected" : ""} ${run?.status === "running" ? "running" : ""}`}
                   style={{ backgroundColor: b?.appearance.background }}

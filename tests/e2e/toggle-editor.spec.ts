@@ -638,3 +638,83 @@ test("named OBS observations reconcile events, retain missing choices and keep r
     await server.close().catch(() => {});
   }
 });
+
+test("OBS connection replacement invalidates a running target and reconciles only the new connection", async () => {
+  const first = await fakeObs(),
+    second = await fakeObs();
+  try {
+    const doc = defaults(),
+      b = binding("desktop.copy", "Connection guard"),
+      marker = join(directory, "obsolete-effect");
+    delete b.press;
+    doc.connections = [{ id: "studio", name: "Studio", url: first.url }];
+    b.toggle = {
+      on: command('sleep 2; printf obsolete > "$1"', [marker]),
+      off: command("true"),
+      source: {
+        kind: "observed",
+        observation: {
+          kind: "obs",
+          connectionId: "studio",
+          property: "streaming",
+          name: "",
+        },
+        onWhen: true,
+      },
+    };
+    doc.profiles[0].pages[0].keys = { 0: b };
+    await launch(doc);
+    await expect.poll(state).toMatchObject({ confirmed: "off", fresh: true });
+    await page.getByRole("button", { name: "Execute saved toggle" }).click();
+    await expect.poll(state).toMatchObject({ transitioning: true });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async () => (await window.decker.snapshot()).runs.at(-1)?.status,
+        ),
+      )
+      .toBe("running");
+    await page.evaluate(async (url) => {
+      const doc = (await window.decker.snapshot()).document;
+      doc.connections[0].url = url;
+      await window.decker.request({ type: "save", document: doc });
+    }, second.url);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async () => (await window.decker.snapshot()).runs.at(-1)?.status,
+        ),
+      )
+      .toBe("cancelled");
+    await expect
+      .poll(state)
+      .toMatchObject({ confirmed: "off", fresh: false, transitioning: false });
+    await expect(readFile(marker, "utf8")).rejects.toThrow();
+    await expect.poll(() => second.connections).toBeGreaterThan(0);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async () => (await window.decker.snapshot()).observed["obs:studio"],
+        ),
+      )
+      .toMatchObject({ connected: true, streaming: false });
+    await page
+      .getByRole("button", { name: "Test / Refresh saved state" })
+      .click();
+    await expect
+      .poll(state)
+      .toMatchObject({ confirmed: "off", fresh: true, blocked: false });
+    first.emit("StreamStateChanged", {
+      outputActive: true,
+      outputState: "OBS_WEBSOCKET_OUTPUT_STARTED",
+    });
+    expect(
+      (await page.evaluate(() => window.decker.snapshot())).observed[
+        "obs:studio"
+      ],
+    ).toMatchObject({ streaming: false });
+  } finally {
+    await first.close();
+    await second.close();
+  }
+});

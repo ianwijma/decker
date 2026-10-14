@@ -340,9 +340,17 @@ test("legacy appearance overrides survive cancellation on desktop", async () => 
     });
     await window.decker.request({ type: "save", document: doc });
   });
-  await page
-    .getByRole("button", { name: "Key 3: Run fixture", exact: true })
-    .dblclick();
+  const savedKey = page.getByRole("button", {
+    name: "Key 3: Run fixture",
+    exact: true,
+  });
+  await savedKey.click();
+  // IPC saves commit before the deferred renderer snapshot. The label is
+  // unchanged here, so observe the new sequence before executing its generation.
+  await expect(
+    page.locator(".inspector").getByLabel("Action", { exact: true }).first(),
+  ).toHaveValue("deck.appearance");
+  await savedKey.dblclick();
   const run = page.getByRole("button", {
     name: "Key 3: Legacy override",
     exact: true,
