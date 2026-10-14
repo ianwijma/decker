@@ -315,3 +315,9 @@ PR19 tests use fixture commands, mock adapter observations, simulator/Electron,
 paired web input, durable storage fixtures and generated image comparisons.
 Real Stream Deck, desktop MPRIS/audio/OBS and OS keyring acceptance remain pending
 for the coordinator's consolidated host session.
+
+Runner-to-main state requests additionally carry the captured definition
+fingerprint. Main rechecks it inside the mutation queue, so a graph/alias/connection
+edit rejects an obsolete queued prepare/commit/recovery even when its configured
+workflow target and durable stamp are unchanged. This fingerprint is private
+request metadata, not a new stored-record format, preserving valid v4 state.

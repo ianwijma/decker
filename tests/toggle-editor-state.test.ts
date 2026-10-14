@@ -536,3 +536,60 @@ it("offers named OBS targets only for exposed observations, preserving names con
     }),
   ).toEqual([]);
 });
+
+it("rejects queued writes from obsolete workflow definitions while retaining cosmetic and durable stamp compatibility", async () => {
+  const { doc, b, deckId } = fixture(),
+    dir = await directory(),
+    store = new ToggleStorage(dir);
+  await store.load();
+  b.toggle!.on = { kind: "workflow", workflowId: doc.workflows[0].id };
+  const request = {
+    operation: "prepare" as const,
+    key: toggleKey(deckId, b),
+    stamp: toggleStamp(b),
+    definitionStamp: toggleDefinitionStamp(b, doc),
+    token: "old-transition",
+    confirmed: "off" as const,
+  };
+  const initial = structuredClone(doc);
+  // A main mutation can commit the graph before an old runner request reaches its queue.
+  doc.workflows[0].revision++;
+  doc.workflows[0].graph.nodes[0].config = { changed: "execution" };
+  expect(b.generation).toBe(initial.profiles[0].pages[0].keys[0].generation);
+  expect(toggleStamp(b)).toBe(request.stamp);
+  await expect(store.request(request, doc)).rejects.toThrow(
+    "Stale toggle definition",
+  );
+  expect(
+    await store.request(
+      {
+        ...request,
+        operation: "read",
+        definitionStamp: toggleDefinitionStamp(b, doc),
+      },
+      doc,
+    ),
+  ).toBeNull();
+  b.appearance.label = "Cosmetic";
+  b.toggle!.appearance = { on: { label: "New artwork" } };
+  const current = toggleDefinitionStamp(b, doc);
+  await store.request({ ...request, definitionStamp: current }, doc);
+  await expect(
+    store.request(
+      {
+        ...request,
+        operation: "commit",
+        definitionStamp: current,
+        confirmed: "on",
+      },
+      doc,
+    ),
+  ).resolves.toMatchObject({ confirmed: "on" });
+  // The new guard is private request metadata, not part of durable v4/v5 stamps or records.
+  const raw = JSON.parse(
+    await import("node:fs/promises").then((fs) =>
+      fs.readFile(join(dir, "toggles.json"), "utf8"),
+    ),
+  );
+  expect(raw.entries[0]).not.toHaveProperty("definitionStamp");
+});

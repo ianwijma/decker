@@ -144,6 +144,7 @@ export class Toggles {
         operation: "read",
         key: e.key,
         stamp: e.stamp,
+        definitionStamp: e.definitionStamp,
       });
       if (!e.valid) return;
       const source = e.binding.toggle!.source;
@@ -234,6 +235,7 @@ export class Toggles {
           operation: "recover",
           key: e.key,
           stamp: e.stamp,
+          definitionStamp: e.definitionStamp,
           confirmed: observed,
         });
       } catch {
@@ -293,6 +295,7 @@ export class Toggles {
         operation: "prepare",
         key: e.key,
         stamp: e.stamp,
+        definitionStamp: e.definitionStamp,
         token,
         confirmed:
           e.state.confirmed === "unknown" ? undefined : e.state.confirmed,
@@ -319,6 +322,7 @@ export class Toggles {
         operation: "commit",
         key: e.key,
         stamp: e.stamp,
+        definitionStamp: e.definitionStamp,
         token,
         confirmed: confirmed === "unknown" ? undefined : confirmed,
       });
@@ -409,6 +413,7 @@ export class Toggles {
         operation: "recover",
         key: e.key,
         stamp: e.stamp,
+        definitionStamp: e.definitionStamp,
         confirmed,
       });
       if (!e.valid) return false;
