@@ -1,6 +1,12 @@
 import { isAbsolute } from "node:path";
-import type { OpenDialogOptions, OpenDialogReturnValue } from "electron";
+import type {
+  OpenDialogOptions,
+  OpenDialogReturnValue,
+  SaveDialogOptions,
+  SaveDialogReturnValue,
+} from "electron";
 import { desktopPathSchema } from "../shared/desktop-target";
+import { textFilePathSchema } from "../shared/text-files";
 
 export async function pickDesktopFile(
   showOpenDialog: (
@@ -16,4 +22,16 @@ export async function pickDesktopFile(
   if (result.filePaths.length !== 1 || !isAbsolute(path))
     throw new Error("The file selector must return one absolute path");
   return path;
+}
+
+export async function pickDesktopDestination(
+  showSaveDialog: (
+    options: SaveDialogOptions,
+  ) => Promise<SaveDialogReturnValue>,
+): Promise<string | null> {
+  const result = await showSaveDialog({
+    title: "Choose text file destination",
+  });
+  if (result.canceled) return null;
+  return textFilePathSchema.parse(result.filePath);
 }

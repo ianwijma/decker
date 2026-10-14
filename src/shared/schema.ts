@@ -454,7 +454,10 @@ export const requestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("export") }),
   z.object({ type: z.literal("asset") }),
   z
-    .object({ type: z.literal("pickFile"), picker: z.literal("openFile") })
+    .object({
+      type: z.literal("pickFile"),
+      picker: z.enum(["openFile", "saveFile"]),
+    })
     .strict(),
   z
     .object({

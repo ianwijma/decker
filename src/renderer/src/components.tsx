@@ -179,7 +179,8 @@ export function ActionFields({
                     <option key={o}>{o}</option>
                   ))}
                 </select>
-              ) : field.key === "script" ||
+              ) : field.multiline ||
+                field.key === "script" ||
                 field.key === "text" ||
                 field.key === "body" ? (
                 <textarea
@@ -232,11 +233,12 @@ export function ActionFields({
             ) : (
               literalEditor(value, (v) => change(field, v))
             )}
-            {field.type === "file" && field.picker === "openFile" && (
+            {field.type === "file" && field.picker && (
               <FilePickerButton
                 scope={scope}
                 action={action}
                 fieldKey={field.key}
+                picker={field.picker}
                 label={field.label}
                 onSelect={(path) => change(field, path)}
               />

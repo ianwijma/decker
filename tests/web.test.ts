@@ -256,6 +256,7 @@ it("does not expose desktop file selection or filesystem requests to paired inpu
     { ws } = await connect(f.base, paired.cookie);
   for (const [index, request] of [
     { type: "pickFile", picker: "openFile" },
+    { type: "pickFile", picker: "saveFile" },
     { type: "asset" },
     { type: "desktop.openFile", path: "/etc/passwd" },
     { type: "request", request: { type: "pickFile", picker: "openFile" } },
@@ -267,9 +268,9 @@ it("does not expose desktop file selection or filesystem requests to paired inpu
   }
   // An authorized key remains usable; only down/up reach the host callback.
   ws.send(
-    JSON.stringify({ type: "down", key: 0, version: "page-1", sequence: 5 }),
+    JSON.stringify({ type: "down", key: 0, version: "page-1", sequence: 6 }),
   );
-  ws.send(JSON.stringify({ type: "up", key: 0, sequence: 6 }));
+  ws.send(JSON.stringify({ type: "up", key: 0, sequence: 7 }));
   await vi.waitFor(() => expect(f.input).toHaveBeenCalledTimes(2));
   expect(f.input.mock.calls.map(([event]) => event.down)).toEqual([
     true,

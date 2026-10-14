@@ -10,6 +10,12 @@ import type { ActionInstance } from "./schema";
 import { desktopPathSchema, desktopUrlSchema } from "./desktop-target";
 import { mediaActions } from "./media";
 import {
+  readTextFileSchema,
+  mutateTextFileSchema,
+  readTextFileOutputSchema,
+  mutateTextFileOutputSchema,
+} from "./text-files";
+import {
   DEFAULT_BRIGHTNESS_STEP,
   brightnessStepSchema,
   brightnessValueSchema,
@@ -31,7 +37,8 @@ export type Field = {
     | "file"
     | "json";
   /** For a file field, offer the desktop-only native selector beside manual entry. */
-  picker?: "openFile";
+  picker?: "openFile" | "saveFile";
+  multiline?: boolean;
   options?: string[];
   default?: string | number | boolean;
   hint?: string;
@@ -116,6 +123,51 @@ const definitions: Omit<
     ],
     idempotent: false,
   },
+  {
+    id: "file.readText",
+    name: "Read text file",
+    group: "Developer",
+    icon: "▤",
+    description:
+      "Read complete UTF-8 text up to 65,536 bytes; larger files fail explicitly.",
+    capabilities: [],
+    fields: [
+      {
+        ...f("path", "File path", "", "file"),
+        picker: "openFile",
+        hint: "Absolute host path only. Final symlinks, hard links and non-regular files are unsupported.",
+      },
+    ],
+    idempotent: true,
+  },
+  ...(["write", "append"] as const).map((operation) => ({
+    id: operation === "write" ? "file.writeText" : "file.appendText",
+    name: operation === "write" ? "Write text file" : "Append text file",
+    group: "Developer",
+    icon: "▤",
+    description:
+      operation === "write"
+        ? "Replace UTF-8 content atomically. Successful writes cannot be undone by cancellation."
+        : "Add UTF-8 content without overwriting existing bytes. Partial appends cannot be undone; retries are off by default.",
+    capabilities: [],
+    fields: [
+      {
+        ...f("path", "File path", "", "file"),
+        picker: "saveFile" as const,
+        hint: "Choose a destination, including a new file, or enter an absolute host path. No home/environment expansion.",
+      },
+      {
+        ...f("content", "Content", ""),
+        multiline: true,
+        hint: "At most 262,144 UTF-8 bytes. References must resolve to text; mixed templates explicitly format JSON values.",
+      },
+      {
+        ...f("createParents", "Create parent directories", false, "boolean"),
+        hint: "Off by default. Created directories and successful file effects remain after cancellation.",
+      },
+    ],
+    idempotent: operation === "write",
+  })),
   {
     id: "command.run",
     name: "Run command",
@@ -415,7 +467,7 @@ const commandOutputSchema = z.object({
   exitCode: z.number().int(),
 });
 export const catalog: ActionDefinition[] = definitions.map((d) => {
-  let schema =
+  let schema: z.ZodType<Record<string, unknown>> =
     d.id === "data.parseJson"
       ? parseJsonSchema
       : d.id === "data.extract"
@@ -444,6 +496,9 @@ export const catalog: ActionDefinition[] = definitions.map((d) => {
               ]),
             ),
           );
+  if (d.id === "file.readText") schema = readTextFileSchema;
+  if (d.id === "file.writeText" || d.id === "file.appendText")
+    schema = mutateTextFileSchema;
   if (d.id === "deck.brightnessIncrease" || d.id === "deck.brightnessDecrease")
     schema = z.object({ step: brightnessStepSchema });
   return {
@@ -452,17 +507,22 @@ export const catalog: ActionDefinition[] = definitions.map((d) => {
     schema,
     inputSchema: schema,
     outputSchema:
-      d.id === "deck.brightnessIncrease" || d.id === "deck.brightnessDecrease"
-        ? brightnessValueSchema
-        : d.id === "http.request"
-          ? httpOutputSchema
-          : d.id === "data.parseJson" || d.id === "data.extract"
-            ? valueOutputSchema
-            : d.id === "command.run" || d.id === "command.shell"
-              ? commandOutputSchema
-              : d.id === "app.launch"
-                ? z.object({ pid: z.number().int() })
-                : z.unknown(),
+      d.id === "file.readText"
+        ? readTextFileOutputSchema
+        : d.id === "file.writeText" || d.id === "file.appendText"
+          ? mutateTextFileOutputSchema
+          : d.id === "deck.brightnessIncrease" ||
+              d.id === "deck.brightnessDecrease"
+            ? brightnessValueSchema
+            : d.id === "http.request"
+              ? httpOutputSchema
+              : d.id === "data.parseJson" || d.id === "data.extract"
+                ? valueOutputSchema
+                : d.id === "command.run" || d.id === "command.shell"
+                  ? commandOutputSchema
+                  : d.id === "app.launch"
+                    ? z.object({ pid: z.number().int() })
+                    : z.unknown(),
   };
 });
 export const actionById = (id: string) => catalog.find((d) => d.id === id);
