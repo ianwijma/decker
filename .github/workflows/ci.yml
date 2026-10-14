@@ -10,6 +10,8 @@ jobs:
     name: Test and package Linux
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    outputs:
+      artifact_id: ${{ steps.packages.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,14 +27,22 @@ jobs:
       - run: npm run build
       - name: Electron interaction tests
         run: xvfb-run --auto-servernum npm run test:e2e
+      - name: Compute immutable development build version
+        run: |
+          export SOURCE_DATE="$(git show -s --format=%cI HEAD)"
+          node scripts/nightly.ts metadata work/nightly
       - name: Build Debian and AppImage packages
-        run: npm run package
+        run: npm run package -- --x64 --config work/nightly/builder.json
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
       - name: Packaged Electron and native module smoke tests
         run: xvfb-run --auto-servernum npm run test:e2e
         env:
           DECKER_EXECUTABLE: release/linux-unpacked/decker
+      - name: Validate and checksum tested installers
+        run: |
+          node scripts/nightly.ts bundle
+          node scripts/nightly.ts verify
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -41,8 +51,35 @@ jobs:
             test-results/
             playwright-report/
       - uses: actions/upload-artifact@v4
+        id: packages
         with:
-          name: decker-linux-x64
-          path: |
-            release/*.deb
-            release/*.AppImage
+          name: decker-linux-x64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release/nightly/
+          if-no-files-found: error
+  publish:
+    name: Publish immutable develop prerelease
+    needs: verify
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/develop' &&
+      github.repository == 'ianwijma/decker' && needs.verify.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.verify.outputs.artifact_id }}
+          merge-multiple: true
+          path: release/nightly
+      - name: Verify artifact provenance and publish prerelease
+        run: node scripts/nightly.ts publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
