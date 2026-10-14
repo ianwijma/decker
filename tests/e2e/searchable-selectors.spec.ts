@@ -158,6 +158,10 @@ test("change page searches pages and nested folders, preserves missing targets a
     doc.profiles[1].pages[0].name = "Other profile page";
     await window.decker.request({ type: "save", document: doc });
   });
+  // This second fixture save also needs to reach the renderer before editing.
+  await expect(
+    page.getByRole("button", { name: "Tools", exact: true }),
+  ).toBeVisible();
   await page
     .getByRole("button", { name: "Change page / folder", exact: true })
     .click();
