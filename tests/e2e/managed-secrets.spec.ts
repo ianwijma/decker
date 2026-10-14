@@ -207,6 +207,18 @@ test("desktop IPC rejects stale/deleted owners, direct ref mutation and competin
 
 test("cancels queued navigation while an import dialog holds the credential/document save queue", async () => {
   const page = await launch();
+  // A packaged window can open before the runner's ready handshake. Wait for
+  // its keyboard diagnostic before blocking document mutations and running.
+  // OBS capability is derived in main and exists even before the runner starts.
+  await expect
+    .poll(() =>
+      page.evaluate(async () =>
+        (await window.decker.snapshot()).capabilities.some(
+          (c) => c.id === "keyboard",
+        ),
+      ),
+    )
+    .toBe(true);
   const workflowId = await page.evaluate(async () => {
     const doc = (await window.decker.snapshot()).document,
       workflow = doc.workflows[0];
