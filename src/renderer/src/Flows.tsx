@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -6,6 +6,8 @@ import {
   MiniMap,
   Handle,
   Position,
+  useNodesState,
+  useUpdateNodeInternals,
   type NodeProps,
   type Node as CanvasNode,
   type NodeChange,
@@ -15,11 +17,12 @@ import "@xyflow/react/dist/style.css";
 import { ArrowLeft, Play, Plus, Search, Square, Trash2 } from "lucide-react";
 import { useApp } from "./store";
 import { node, uid } from "../../shared/defaults";
-import { actionById, catalog, makeAction } from "../../shared/catalog";
+import { catalog, makeAction } from "../../shared/catalog";
 import type {
   FlowNode,
   Graph,
   Json,
+  RunRecord,
   WorkflowDefinition,
 } from "../../shared/schema";
 import { validateWorkflow } from "../../runtime/validate";
@@ -29,15 +32,25 @@ import {
   FieldLabel,
   JsonEditor,
 } from "./components";
+import {
+  changedLayout,
+  graphNodes,
+  reconcileNodes,
+  type FlowData,
+  type FlowCanvasNode,
+} from "./flow-canvas";
+import {
+  createLatestFlowRunSelector,
+  selectFlowWorkflows,
+} from "./flow-selectors";
+import "./flow-canvas.css";
 type Path = Array<{ nodeId: string; branch?: number }>;
-type FlowData = {
-  name: string;
-  kind: string;
-  ports: string[];
-  status?: string;
-  icon: string;
-};
-function WorkflowNode({ data, selected }: NodeProps<CanvasNode<FlowData>>) {
+function WorkflowNode({ id, data, selected }: NodeProps<CanvasNode<FlowData>>) {
+  const updateNodeInternals = useUpdateNodeInternals();
+  const ports = JSON.stringify(data.ports);
+  useLayoutEffect(() => {
+    updateNodeInternals(id);
+  }, [id, ports, updateNodeInternals]);
   return (
     <div
       className={`flow-node ${selected ? "selected" : ""} ${data.status ?? ""}`}
@@ -127,17 +140,122 @@ function newNode(kind: FlowNode["kind"], name: string): FlowNode {
   }
   return n;
 }
-export function Flows() {
-  const { snapshot, edit, request } = useApp(),
-    doc = snapshot!.document,
-    [flowId, setFlowId] = useState(doc.workflows[0]?.id ?? ""),
+function FlowCanvas({
+  workflow,
+  graph,
+  latest,
+  selected,
+  onSelect,
+  update,
+  connect,
+}: {
+  workflow: WorkflowDefinition;
+  graph: Graph;
+  latest: RunRecord | undefined;
+  selected: string;
+  onSelect: (id: string) => void;
+  update: (fn: (workflow: WorkflowDefinition, graph: Graph) => void) => void;
+  connect: (connection: Connection) => void;
+}) {
+  const source = useMemo(
+    () => graphNodes(graph, workflow.layout, latest),
+    [graph, workflow.layout, latest],
+  );
+  const previousSource = useRef(source);
+  const [nodes, setNodes, applyChanges] = useNodesState<FlowCanvasNode>(
+    source.map((n) => ({ ...n, selected: n.id === selected })),
+  );
+  useLayoutEffect(() => {
+    const before = previousSource.current;
+    setNodes((previous) => reconcileNodes(previous, source, before, selected));
+    previousSource.current = source;
+  }, [source, selected, setNodes]);
+  const persistPositions = (moved: FlowCanvasNode[]) => {
+    const changed = changedLayout(moved, workflow.layout);
+    if (changed.length)
+      update((f, g) => {
+        for (const n of changed)
+          if (g.nodes.some((node) => node.id === n.id))
+            f.layout[n.id] = { ...n.position };
+      });
+  };
+  const nodeChanges = (changes: NodeChange<FlowCanvasNode>[]) => {
+    applyChanges(changes);
+    const selection = changes.findLast(
+      (c) => c.type === "select" && c.selected,
+    );
+    if (selection?.type === "select") onSelect(selection.id);
+    const removed = changes.filter((c) => c.type === "remove").map((c) => c.id);
+    if (removed.length) {
+      update((f, g) => {
+        g.nodes = g.nodes.filter((n) => !removed.includes(n.id));
+        g.edges = g.edges.filter(
+          (e) => !removed.includes(e.source) && !removed.includes(e.target),
+        );
+        for (const id of removed) delete f.layout[id];
+      });
+      if (removed.includes(selected)) onSelect("");
+    }
+    // Arrow-key movement has no drag-stop event. Measurement and selection are local only.
+    const keyboardMoves = changes.flatMap((c) =>
+      c.type === "position" && c.position && c.dragging !== true
+        ? nodes
+            .filter((n) => n.id === c.id && !n.dragging)
+            .map((n) => ({ ...n, position: c.position! }))
+        : [],
+    );
+    if (keyboardMoves.length) persistPositions(keyboardMoves);
+  };
+  const edges = useMemo(
+    () =>
+      graph.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.port,
+        label: e.port === "next" ? "" : e.port,
+        animated: latest?.status === "running",
+      })),
+    [graph.edges, latest?.status],
+  );
+  return (
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      nodeTypes={nodeTypes}
+      onNodeClick={(_e, n) => onSelect(n.id)}
+      onPaneClick={() => onSelect("")}
+      onNodesChange={nodeChanges}
+      onNodeDragStop={(_event, _node, moved) => persistPositions(moved)}
+      onSelectionDragStop={(_event, moved) => persistPositions(moved)}
+      onEdgesDelete={(removed) =>
+        update((_f, g) => {
+          g.edges = g.edges.filter((e) => !removed.some((x) => x.id === e.id));
+        })
+      }
+      onConnect={connect}
+      fitView
+      colorMode="dark"
+      minZoom={0.25}
+      maxZoom={1.6}
+    >
+      <Background gap={24} size={1} />
+      <Controls />
+      <MiniMap pannable zoomable nodeColor="var(--accent)" />
+    </ReactFlow>
+  );
+}
+
+export const Flows = memo(function Flows() {
+  const edit = useApp((state) => state.edit),
+    request = useApp((state) => state.request);
+  const workflows = useApp(selectFlowWorkflows);
+  const doc = { workflows };
+  const [flowId, setFlowId] = useState(doc.workflows[0]?.id ?? ""),
     [selected, setSelected] = useState(""),
     [search, setSearch] = useState(""),
     [path, setPath] = useState<Path>([]),
     [runInputs, setRunInputs] = useState<Json>({});
-  const [positions, setPositions] = useState<
-    Record<string, { x: number; y: number }>
-  >({});
   const workflow =
     doc.workflows.find((f) => f.id === flowId) ?? doc.workflows[0];
   const graph = workflow ? at(workflow.graph, path) : undefined,
@@ -180,69 +298,12 @@ export function Flows() {
     });
     setSelected(n.id);
   };
-  const latest = snapshot!.runs
-      .filter((r) => r.workflowId === workflow?.id)
-      .at(-1),
-    issues = workflow ? validateWorkflow(workflow, doc.workflows) : [];
-  const canvasNodes = useMemo(
-    () =>
-      graph?.nodes.map((n, index) => ({
-        id: n.id,
-        type: "workflow",
-        position: positions[n.id] ??
-          workflow!.layout[n.id] ?? { x: 60 + index * 270, y: 120 },
-        selected: n.id === selected,
-        data: {
-          name: n.name,
-          kind: n.kind,
-          icon: n.action
-            ? (actionById(n.action.type)?.icon ?? "✦")
-            : (blocks.find((b) => b.kind === n.kind)?.icon ?? "✦"),
-          status: latest?.nodes.filter((x) => x.nodeId === n.id).at(-1)?.status,
-          ports:
-            n.kind === "condition"
-              ? ["true", "false", "error"]
-              : n.kind === "switch"
-                ? [
-                    ...(Array.isArray(n.config.cases)
-                      ? n.config.cases.map(String)
-                      : []),
-                    "default",
-                    "error",
-                  ]
-                : n.kind === "return"
-                  ? []
-                  : ["next", "error"],
-        },
-      })) ?? [],
-    [graph, workflow, selected, latest, positions],
+  const selectLatestRun = useMemo(
+    () => createLatestFlowRunSelector(workflow?.id),
+    [workflow?.id],
   );
-  const canvasEdges =
-    graph?.edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      sourceHandle: e.port,
-      label: e.port === "next" ? "" : e.port,
-      animated: latest?.status === "running",
-    })) ?? [];
-  const nodeChanges = (changes: NodeChange<CanvasNode<FlowData>>[]) => {
-    const removed = changes.filter((c) => c.type === "remove").map((c) => c.id);
-    if (removed.length)
-      update((_f, g) => {
-        g.nodes = g.nodes.filter((n) => !removed.includes(n.id));
-        g.edges = g.edges.filter(
-          (e) => !removed.includes(e.source) && !removed.includes(e.target),
-        );
-      });
-    for (const change of changes) {
-      if (change.type === "position" && change.position) {
-        const position = change.position;
-        setPositions((previous) => ({ ...previous, [change.id]: position }));
-      }
-      if (change.type === "select" && change.selected) setSelected(change.id);
-    }
-  };
+  const latest = useApp(selectLatestRun);
+  const issues = workflow ? validateWorkflow(workflow, doc.workflows) : [];
   const connect = (connection: Connection) =>
     update((_f, g) => {
       const port = connection.sourceHandle ?? "next";
@@ -400,35 +461,16 @@ export function Flows() {
               </div>
             )}
             <div className="flow-canvas">
-              <ReactFlow
-                nodes={canvasNodes}
-                edges={canvasEdges}
-                nodeTypes={nodeTypes}
-                onNodeClick={(_e, n) => setSelected(n.id)}
-                onPaneClick={() => setSelected("")}
-                onNodesChange={nodeChanges}
-                onNodeDragStop={(_event, node) =>
-                  update((f) => {
-                    f.layout[node.id] = node.position;
-                  })
-                }
-                onEdgesDelete={(edges) =>
-                  update((_f, g) => {
-                    g.edges = g.edges.filter(
-                      (e) => !edges.some((x) => x.id === e.id),
-                    );
-                  })
-                }
-                onConnect={connect}
-                fitView
-                colorMode="dark"
-                minZoom={0.25}
-                maxZoom={1.6}
-              >
-                <Background gap={24} size={1} />
-                <Controls />
-                <MiniMap pannable zoomable nodeColor="var(--accent)" />
-              </ReactFlow>
+              <FlowCanvas
+                key={JSON.stringify([workflow.id, path])}
+                workflow={workflow}
+                graph={graph!}
+                latest={latest}
+                selected={selected}
+                onSelect={setSelected}
+                update={update}
+                connect={connect}
+              />
             </div>
             <div
               className={`validation-bar ${issues.length ? "has-issues" : ""}`}
@@ -825,4 +867,4 @@ export function Flows() {
       </aside>
     </div>
   );
-}
+});

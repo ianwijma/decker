@@ -1,0 +1,15 @@
+.flow-canvas .react-flow__node {
+  /* Pointer movement must be painted immediately, including during status updates. */
+  transition: none;
+}
+.flow-canvas .react-flow__minimap {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.flow-canvas .react-flow__minimap-node {
+  fill: var(--accent);
+  fill-opacity: 0.85;
+  stroke: var(--accent-contrast);
+  stroke-width: 1;
+}
