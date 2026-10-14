@@ -115,8 +115,15 @@ async function drag(
   workflowId = "welcome",
 ) {
   const element = page.locator(`.react-flow__node[data-id="${id}"]`);
-  const box = (await element.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const selection = page.locator(".react-flow__nodesselection-rect");
+  const target = (await selection.isVisible()) ? selection : element;
+  // Hover waits for stable, actionable bounds after a scoped canvas fits its
+  // viewport. A bounding box read alone can capture the pre-fit coordinates.
+  await target.hover();
+  const box = (await target.boundingBox())!;
+  const initial = await element.evaluate(
+    (node) => (node as HTMLElement).style.transform,
+  );
   await page.mouse.down();
   await page.mouse.move(
     box.x + box.width / 2 + dx,
@@ -127,6 +134,7 @@ async function drag(
   const dropped = await element.evaluate(
     (node) => (node as HTMLElement).style.transform,
   );
+  expect(dropped).not.toBe(initial);
   // The save indicator can still show the preceding render immediately after
   // pointer-up. Wait for this drop's layout before leaving a workflow or scope.
   await expect
