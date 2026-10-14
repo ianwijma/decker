@@ -21,6 +21,7 @@ async function launch() {
   await expect(
     page.getByRole("button", { name: "Deck: My XL", exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Deck: My XL", exact: true }).click();
   return page;
 }
 test.beforeEach(async () => {
@@ -203,10 +204,16 @@ test("55 profiles use normal navigation, activate creation and stay deck scoped 
   await search.fill("Duplicate profile");
   await expect(page.getByRole("option")).toHaveCount(2);
   await page.getByRole("option", { name: /ID: profile-52$/ }).click();
+  // Navigation publishes a snapshot asynchronously. Wait for it to render
+  // before fill selects the input text; a value update can reset that selection.
+  await expect(trigger).toHaveText("Duplicate profile");
   await page.getByText("Manage profile & page", { exact: true }).click();
-  await page
-    .getByRole("textbox", { name: "Profile name", exact: true })
-    .fill("Second profile duplicate");
+  const profileName = page.getByRole("textbox", {
+    name: "Profile name",
+    exact: true,
+  });
+  await expect(profileName).toHaveValue("Duplicate profile");
+  await profileName.fill("Second profile duplicate");
   await expect(trigger).toHaveText("Second profile duplicate");
   await saved(page);
   await expect
@@ -260,6 +267,7 @@ test("55 profiles use normal navigation, activate creation and stay deck scoped 
   await expect(search).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await page.reload();
+  await page.getByRole("button", { name: "Deck: My XL", exact: true }).click();
   await expect(trigger).toHaveText("Created and active");
   await app.close();
   page = await launch();

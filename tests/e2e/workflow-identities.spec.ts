@@ -20,6 +20,7 @@ async function launch() {
   await expect(
     page.getByRole("button", { name: "Deck: My XL", exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Deck: My XL", exact: true }).click();
   return page;
 }
 test.beforeEach(async () => {
