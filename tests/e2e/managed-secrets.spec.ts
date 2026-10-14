@@ -193,3 +193,95 @@ test("desktop IPC rejects stale/deleted owners, direct ref mutation and competin
   expect(results.deleted).toBe(true);
   expect(results.snapshot).not.toContain("synthetic-race-token");
 });
+
+test("cancels queued navigation while an import dialog holds the credential/document save queue", async () => {
+  const page = await launch();
+  const workflowId = await page.evaluate(async () => {
+    const doc = (await window.decker.snapshot()).document,
+      workflow = doc.workflows[0];
+    doc.profiles[0].pages.push({
+      id: "queued-target-page",
+      name: "Queued target",
+      keys: {},
+    });
+    const action = structuredClone(workflow.graph.nodes[0]);
+    action.kind = "action";
+    action.name = "Queued navigation";
+    action.action = {
+      type: "deck.page",
+      version: 1,
+      config: { pageId: "queued-target-page" },
+    };
+    workflow.name = "Queued navigation";
+    workflow.graph = { entry: action.id, nodes: [action], edges: [] };
+    await window.decker.request({ type: "save", document: doc });
+    return workflow.id;
+  });
+  await app.evaluate(({ dialog }) => {
+    dialog.showOpenDialog = (() =>
+      new Promise((resolve) => {
+        (globalThis as unknown as { secretDialog: () => void }).secretDialog =
+          () => resolve({ canceled: true, filePaths: [] });
+      })) as typeof dialog.showOpenDialog;
+  });
+  await page.evaluate(() => {
+    void window.decker.request({ type: "import" });
+  });
+  await expect
+    .poll(() =>
+      app.evaluate(() =>
+        Boolean(
+          (globalThis as unknown as { secretDialog?: unknown }).secretDialog,
+        ),
+      ),
+    )
+    .toBe(true);
+  await page.evaluate(
+    (workflowId) =>
+      window.decker.request({ type: "run", workflowId, inputs: {} }),
+    workflowId,
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(async () =>
+        (await window.decker.snapshot()).runs.some(
+          (r) =>
+            r.workflowName === "Queued navigation" &&
+            r.nodes.length &&
+            r.status === "running",
+        ),
+      ),
+    )
+    .toBe(true);
+  const runId = await page.evaluate(
+    async () =>
+      (await window.decker.snapshot()).runs.find(
+        (r) => r.workflowName === "Queued navigation",
+      )!.id,
+  );
+  await page.evaluate(
+    (runId) => window.decker.request({ type: "cancel", runId }),
+    runId,
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async () =>
+          (await window.decker.snapshot()).runs.find(
+            (r) => r.workflowName === "Queued navigation",
+          )?.status,
+      ),
+    )
+    .toBe("cancelled");
+  await app.evaluate(() =>
+    (globalThis as unknown as { secretDialog: () => void }).secretDialog(),
+  );
+  // Saving after the queued main action flushes the mutation queue. Navigation
+  // preservation would retain a late page change, so this checks the actual host.
+  const activePage = await page.evaluate(async () => {
+    const doc = (await window.decker.snapshot()).document;
+    await window.decker.request({ type: "save", document: doc });
+    return (await window.decker.snapshot()).document.decks[0].activePageId;
+  });
+  expect(activePage).toBe("home");
+});

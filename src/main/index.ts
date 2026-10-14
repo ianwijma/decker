@@ -364,7 +364,17 @@ async function mainAction(
   return ["deck.page", "deck.profile", "deck.back", "deck.brightness"].includes(
     args[0],
   )
-    ? enqueueMutation(() => performMainAction(...args))
+    ? enqueueMutation(async () => {
+        // A run can cancel while a credential/document commit holds this queue.
+        // Never apply its delayed navigation or brightness after it has settled.
+        if (
+          !runs.some(
+            (run) => run.id === args[2].runId && run.status === "running",
+          )
+        )
+          throw new Error("Run is no longer active");
+        return performMainAction(...args);
+      })
     : performMainAction(...args);
 }
 async function performMainAction(
