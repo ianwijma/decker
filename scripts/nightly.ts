@@ -112,8 +112,11 @@ function filenames(identity: BuildIdentity) {
 function checksumText(manifest: Manifest) {
   return manifest.files.map((f) => `${f.sha256}  ${f.name}\n`).join("");
 }
-export function validateManifest(manifest: Manifest) {
-  validateIdentity(manifest);
+export function validateManifest(
+  manifest: Manifest,
+  validate = validateIdentity,
+) {
+  validate(manifest);
   const expected = filenames(manifest);
   if (
     !Array.isArray(manifest.files) ||
@@ -139,8 +142,9 @@ export async function bundle(
   directory: string,
   identity: BuildIdentity,
   destination: string,
+  validate = validateIdentity,
 ) {
-  validateIdentity(identity);
+  validate(identity);
   const expected = filenames(identity);
   const installers = (await readdir(directory))
     .filter((name) => /\.(deb|AppImage)$/.test(name))
@@ -176,16 +180,19 @@ export async function bundle(
     manifest.files.push({ name, size: bytes.length, sha256: hash(bytes) });
     await copyFile(join(directory, name), join(destination, name));
   }
-  validateManifest(manifest);
+  validateManifest(manifest, validate);
   await writeFile(join(destination, "manifest.json"), json(manifest));
   await writeFile(join(destination, "SHA256SUMS"), checksumText(manifest));
   return manifest;
 }
-export async function verifyBundle(directory: string): Promise<Manifest> {
+export async function verifyBundle(
+  directory: string,
+  validate = validateIdentity,
+): Promise<Manifest> {
   const manifest = JSON.parse(
     (await regularFile(join(directory, "manifest.json"))).toString(),
   ) as Manifest;
-  validateManifest(manifest);
+  validateManifest(manifest, validate);
   const expected = [
     ...filenames(manifest),
     "manifest.json",
@@ -265,14 +272,28 @@ async function assetBytes(api: Api, asset: Asset) {
     throw new Error(`Asset size mismatch: ${asset.name}`);
   return bytes;
 }
-function assertRelease(release: Release, identity: BuildIdentity) {
+export interface PublicationPolicy {
+  validate: (identity: BuildIdentity) => void;
+  authorize: (env: NodeJS.ProcessEnv, identity: BuildIdentity) => void;
+  prerelease: boolean;
+  name: (identity: BuildIdentity) => string;
+  body: string;
+  sameProvenance: (original: Manifest, current: Manifest) => boolean;
+}
+function assertRelease(
+  release: Release,
+  identity: BuildIdentity,
+  prerelease: boolean,
+) {
   if (
-    !release.prerelease ||
+    release.prerelease !== prerelease ||
     release.tag_name !== identity.tag ||
     release.target_commitish !== identity.source_sha
   )
     throw new Error(
-      "Existing release has conflicting provenance or is not a prerelease",
+      prerelease
+        ? "Existing release has conflicting provenance or is not a prerelease"
+        : "Existing release has conflicting provenance or is not stable",
     );
 }
 export async function publish(
@@ -280,27 +301,49 @@ export async function publish(
   env: NodeJS.ProcessEnv,
   api: Api,
 ) {
-  const manifest = await verifyBundle(directory);
-  assertPublication(env, manifest);
+  return publishArtifacts(directory, env, api, {
+    validate: validateIdentity,
+    authorize: assertPublication,
+    prerelease: true,
+    name: (identity) => `Decker development ${identity.version}`,
+    body: `Development build of ${env.GITHUB_SHA}.\n\nSource workflow: https://github.com/${repository}/actions/runs/${env.GITHUB_RUN_ID}\n\nIncludes Linux x64 Debian/AppImage installers, manifest and SHA-256 checksums. Automated checks are not hardware certification.`,
+    sameProvenance: (original, current) =>
+      Object.keys(current)
+        .filter((k) => k !== "files")
+        .every(
+          (k) =>
+            original[k as keyof BuildIdentity] ===
+            current[k as keyof BuildIdentity],
+        ),
+  });
+}
+export async function publishArtifacts(
+  directory: string,
+  env: NodeJS.ProcessEnv,
+  api: Api,
+  policy: PublicationPolicy,
+) {
+  const manifest = await verifyBundle(directory, policy.validate);
+  policy.authorize(env, manifest);
   let release = await findRelease(api, manifest.tag);
-  if (release) assertRelease(release, manifest);
+  if (release) assertRelease(release, manifest, policy.prerelease);
   await assertTag(api, manifest, !release || release.draft);
   if (!release) {
     const response = await api("POST", "releases", {
       tag_name: manifest.tag,
       target_commitish: manifest.source_sha,
-      name: `Decker development ${manifest.version}`,
+      name: policy.name(manifest),
       draft: true,
-      prerelease: true,
+      prerelease: policy.prerelease,
       make_latest: "false",
-      body: `Development build of ${manifest.source_sha}.\n\nSource workflow: https://github.com/${repository}/actions/runs/${manifest.run_id}\n\nIncludes Linux x64 Debian/AppImage installers, manifest and SHA-256 checksums. Automated checks are not hardware certification.`,
+      body: policy.body,
     });
     release =
       response.status === 422
         ? await findRelease(api, manifest.tag)
         : await responseJson<Release>(response);
     if (!release) throw new Error("Release creation failed");
-    assertRelease(release, manifest);
+    assertRelease(release, manifest, policy.prerelease);
   }
   const expectedNames = [...filenames(manifest), "SHA256SUMS", "manifest.json"];
   if (
@@ -319,12 +362,9 @@ export async function publish(
     const original = JSON.parse(
       (await assetBytes(api, originalAsset)).toString(),
     ) as Manifest;
-    validateManifest(original);
-    for (const key of Object.keys(manifest).filter(
-      (k) => k !== "files",
-    ) as Array<keyof BuildIdentity>)
-      if (original[key] !== manifest[key])
-        throw new Error("Published manifest provenance mismatch");
+    validateManifest(original, policy.validate);
+    if (!policy.sameProvenance(original, manifest))
+      throw new Error("Published manifest provenance mismatch");
     if (release.assets.length !== expectedNames.length)
       throw new Error("Published release is incomplete");
     for (const file of original.files) {
@@ -362,17 +402,19 @@ export async function publish(
         throw new Error(`Uploaded artifact verification failed: ${name}`);
     }
   }
-  // Expose the prerelease only after all four uploaded assets have been verified.
+  // Expose the release only after all four uploaded assets have been verified.
   await responseJson(
     await api("PATCH", `releases/${release.id}`, {
       draft: false,
-      prerelease: true,
-      make_latest: "false",
+      prerelease: policy.prerelease,
+      make_latest: policy.prerelease ? "false" : "true",
     }),
   );
-  return "published verified development prerelease";
+  return policy.prerelease
+    ? "published verified development prerelease"
+    : "published verified stable release";
 }
-function githubApi(token: string): Api {
+export function githubApi(token: string): Api {
   return async (method, path, body) => {
     const url = path.startsWith("https:")
       ? path

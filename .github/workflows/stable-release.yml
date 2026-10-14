@@ -1,0 +1,80 @@
+name: Stable release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Reviewed stable package version (X.Y.Z)
+        required: true
+        type: string
+      source_sha:
+        description: Full immutable SHA already promoted to main
+        required: true
+        type: string
+      release_branch:
+        description: Stable release branch
+        required: true
+        default: main
+        type: choice
+        options: [main]
+      host_accepted:
+        description: Consolidated physical host acceptance completed for this revision
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: stable-release-${{ inputs.version }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/develop' &&
+      github.repository == 'ianwijma/decker' && inputs.host_accepted
+    uses: ./.github/workflows/verify-stable.yml
+    with:
+      version: ${{ inputs.version }}
+      source_sha: ${{ inputs.source_sha }}
+      release_branch: ${{ inputs.release_branch }}
+      tooling_sha: ${{ github.sha }}
+  publish:
+    name: Finalize verified stable release
+    needs: verify
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/develop' &&
+      github.repository == 'ianwijma/decker' && inputs.host_accepted &&
+      needs.verify.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: work/tooling
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.verify.outputs.artifact_id }}
+          merge-multiple: true
+          path: release/stable
+      - name: Validate provenance, collect linked PRs and finalize all assets
+        run: node work/tooling/scripts/stable.ts publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+          HOST_ACCEPTED: ${{ inputs.host_accepted }}
+          VERIFY_RESULT: ${{ needs.verify.result }}

@@ -1,0 +1,81 @@
+name: Verify stable source and installers
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      source_sha:
+        required: true
+        type: string
+      release_branch:
+        required: true
+        type: string
+      tooling_sha:
+        required: true
+        type: string
+    outputs:
+      artifact_id:
+        value: ${{ jobs.verify.outputs.artifact_id }}
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Test and package exact stable source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      artifact_id: ${{ steps.packages.outputs.artifact-id }}
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      RELEASE_BRANCH: ${{ inputs.release_branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tooling_sha }}
+          path: work/tooling
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Validate stable version, immutable checkout and main ancestry
+        run: node work/tooling/scripts/stable.ts metadata
+      - name: Install Linux runtime dependencies
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0 libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libxss1 xvfb xauth
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Electron interaction tests
+        run: xvfb-run --auto-servernum npm run test:e2e
+      - name: Build requested stable version
+        run: npm run package -- --x64 --config work/stable/builder.json
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Packaged Electron and native module smoke tests
+        run: xvfb-run --auto-servernum npm run test:e2e
+        env:
+          DECKER_EXECUTABLE: release/linux-unpacked/decker
+      - name: Bundle exact tested bytes with manifest and checksums
+        run: node work/tooling/scripts/stable.ts bundle
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stable-linux-test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-results/
+            playwright-report/
+      - uses: actions/upload-artifact@v4
+        id: packages
+        with:
+          name: stable-linux-x64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release/stable/
+          if-no-files-found: error
