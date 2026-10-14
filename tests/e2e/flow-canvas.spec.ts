@@ -107,10 +107,15 @@ async function seed(page: Page, workflows: WorkflowDefinition[]) {
     await window.decker.request({ type: "save", document: snapshot.document });
   }, JSON.stringify(workflows));
 }
-async function drag(page: Page, id: string, dx: number, dy: number) {
-  const box = (await page
-    .locator(`.react-flow__node[data-id="${id}"]`)
-    .boundingBox())!;
+async function drag(
+  page: Page,
+  id: string,
+  dx: number,
+  dy: number,
+  workflowId = "welcome",
+) {
+  const element = page.locator(`.react-flow__node[data-id="${id}"]`);
+  const box = (await element.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(
@@ -119,6 +124,23 @@ async function drag(page: Page, id: string, dx: number, dy: number) {
     { steps: 12 },
   );
   await page.mouse.up();
+  const dropped = await element.evaluate(
+    (node) => (node as HTMLElement).style.transform,
+  );
+  // The save indicator can still show the preceding render immediately after
+  // pointer-up. Wait for this drop's layout before leaving a workflow or scope.
+  await expect
+    .poll(async () => {
+      const position = (await layout(page, workflowId))[id];
+      if (!position) return undefined;
+      // Compare the exact CSS representation, which rounds fractional coordinates.
+      return page.evaluate((position) => {
+        const style = document.createElement("div").style;
+        style.transform = `translate(${position.x}px, ${position.y}px)`;
+        return style.transform;
+      }, position);
+    })
+    .toBe(dropped);
   await expect(
     page.getByText("All changes saved", { exact: true }),
   ).toBeVisible();
@@ -368,7 +390,7 @@ test("workflow switches and nested scopes reset canvas state and keep saved posi
   b.layout[shared.id] = { x: 500, y: 350 };
   await seed(page, [a, b]);
   await openFlow();
-  await drag(page, shared.id, 45, 30);
+  await drag(page, shared.id, 45, 30, a.id);
   const savedA = await layout(page, a.id);
   await page.getByRole("button", { name: /Scope B$/ }).click();
   await expect(page.locator(".react-flow__node")).toHaveCount(1);
@@ -376,7 +398,7 @@ test("workflow switches and nested scopes reset canvas state and keep saved posi
     "style",
     /translate\(500px, 350px\)/,
   );
-  await drag(page, shared.id, 20, 30);
+  await drag(page, shared.id, 20, 30, b.id);
   const savedB = await layout(page, b.id);
   await page.getByRole("button", { name: /Scope A$/ }).click();
   expect(await layout(page, a.id)).toEqual(savedA);
@@ -393,7 +415,7 @@ test("workflow switches and nested scopes reset canvas state and keep saved posi
       "data-id",
       child,
     );
-    await drag(page, child, 30, 40);
+    await drag(page, child, 30, 40, a.id);
     const childPosition = (await layout(page, a.id))[child];
     await page
       .getByRole("button", { name: "Parent flow", exact: true })
