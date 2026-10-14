@@ -42,7 +42,7 @@ export function defaults(): AppDocument {
   delay.config = { ms: 400 };
   done.config = { status: "Ready to create" };
   return documentSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: 2,
     profiles: [
       {
         id: "default",
@@ -88,17 +88,29 @@ export function defaults(): AppDocument {
       },
     ],
     connections: [],
-    devices: [],
+    decks: [
+      {
+        id: "simulator-xl",
+        name: "My XL",
+        kind: "simulator",
+        icon: "▦",
+        rows: 4,
+        columns: 8,
+        brightness: 70,
+        profileIds: ["default"],
+        activeProfileId: "default",
+        activePageId: "home",
+      },
+    ],
+    activeDeckId: "simulator-xl",
     settings: {
       accent: "#5865f2",
-      brightness: 70,
       startHidden: false,
       launchAtLogin: false,
       closeToTray: true,
-      simulator: true,
+      webEnabled: false,
+      webPort: 9018,
       historyLimit: 200,
     },
-    activeProfileId: "default",
-    activePageId: "home",
   });
 }

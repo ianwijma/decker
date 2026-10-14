@@ -1,8 +1,8 @@
 # Decker
 
-A local Linux Stream Deck app with a Discord-inspired workspace, a configurable accent colour, and a visual workflow editor. Configure keys without hardware using the built-in 32-key XL simulator.
+A local Linux Stream Deck app with a Discord-inspired workspace, a configurable accent colour, and a visual workflow editor. Configure independent hardware, simulator and web decks. A phone or tablet can operate a web deck through its browser on the same local network.
 
-![Decker deck workspace with a custom accent](docs/screenshots/deck.png)
+![Decker workspace with independent decks](docs/screenshots/multi-deck.png)
 
 ## Run locally
 
@@ -18,14 +18,30 @@ The install step downloads the Electron binary before checking native modules.
 that otherwise fail with `Error: Electron uninstall`. The first download needs
 network access; subsequent runs reuse the installed binary.
 
-The simulator is enabled by default. Select a key and choose or drag an action from the library. Double-click a key or use **Test action** to execute it. **Hold simulated key** exercises press, release and long-press bindings. Actions really execute on the local desktop, including in simulator mode.
+The default workspace includes an XL simulator. Use **＋ Add deck** below your decks to scan for Stream Deck hardware or create a web deck/simulator. Every deck has a name, icon and its own profiles/pages. Select a key and choose or drag an action from the library. Double-click a key or use **Test action** to execute it. **Hold simulated key** exercises press, release and long-press bindings. Actions really execute on the local desktop, including in simulator mode.
 
 - **Deck:** profiles, pages, nested folders, labels, images, multi-actions, trigger bindings and concurrency policies.
 - **Flows:** connect control ports; configure data with literal values or field references; edit parallel branches and loop bodies on their own canvases. Explicit groups join before the next connection.
-- **Runs:** status, revisions, per-node timing, errors and bounded/redacted data.
+- **Settings → Diagnostics → Run history:** status, revisions, per-node timing, errors and bounded/redacted data, with deck/workflow filters.
 - **Settings:** accent colour, simulator, brightness, desktop diagnostics, OBS connections, credentials, autostart and workspace import/export.
 
 Closing the editor hides it by default. Runs and physical keys continue working. Choose **Quit Decker** in the tray to stop the application. A Linux tray/status-notifier extension may be necessary for your desktop. Disable close-to-tray if your desktop does not display tray icons.
+
+## Web decks on your local network
+
+1. Choose **＋ Add deck → Web deck**, set a name/icon and rows/columns (1–16 each), then create it. Creation enables local sharing, normally on TCP port 9018. You can pause it or choose another port under **Settings → Web decks**.
+2. Configure its keys in the desktop editor. **Deck settings** changes the icon, accepts an uploaded image, copies profiles from another deck, and resizes the grid. Keys keep their row/column coordinates; assignments outside a smaller grid stay saved and return when expanded.
+3. Choose **Connect browser**. The QR code defaults to a local-network address; choose the address for the network your phone/tablet uses. **This computer** is a loopback address for local testing, not a phone address. The QR/link expires after two minutes and is single-use.
+4. Open it in a browser, give the browser a name, and request pairing. Match the displayed code and approve on the desktop, either in the connect dialog or under **Settings → Web decks**. No phone/tablet app installation is required.
+5. Tap or hold configured keys. Actions execute on the Decker computer. Live key feedback, profiles/pages and folders belong to that deck. Multiple browsers viewing one deck share its current page; separate decks operate independently. Use **Revoke access** to disconnect a paired browser immediately.
+
+Decker must remain running; the editor may be closed to the tray. The computer and browser must be on the same network, and any host firewall must allow the chosen local port. The service listens on IPv4 interfaces, accepts private/loopback/link-local peers, validates host/origin, and has no public/cloud relay. **LAN transport currently uses HTTP/WebSocket without TLS, so use a trusted local network.** Pairing authorizes host actions; it does not encrypt traffic.
+
+The browser is an operator interface. It receives display state, sends validated key events and receives only assets used by its deck; it cannot edit configurations or submit commands. Pairing credentials are HttpOnly/SameSite cookies with separately hashed server records in `web-clients.json`, outside workspace exports. Browser pairings survive restarts on the same host address; imports reset pairings and pause sharing. Different hostnames/IP addresses use separate browser cookies. Disconnect/background clears held keys, disables controls and reconnects without replaying input.
+
+Configuration schema v2 migrates v1 workspaces automatically after creating a migration backup, preserving assignments and history. Existing XL key indices are converted to fixed row/column coordinates. Old hardware entries get independent profile copies. Hardware discovery does not add duplicate configured decks or write to unconfigured devices.
+
+`npm run dev` builds the browser controller before starting Electron development. Rebuild to refresh the browser controller after editing its files.
 
 ## Linux integrations
 
@@ -64,11 +80,11 @@ Condition operators are `equals`, `notEquals`, `greater`, `less`, `contains`, an
 
 Parallel defaults to fail-fast with cooperative sibling cancellation; `mode: "collect"` returns a result per branch. Repeat and For Each require `maxIterations` (1–1000). For Each supports bounded concurrency (1–16, default 1); each branch/iteration has isolated variables and ordered outputs. Each run has a timeout and a 10,000-node budget. Retries are bounded; non-idempotent actions require explicit opt-in. Subflow references pin revisions, reject recursive cycles, and snapshot all definitions at run start. Parent cancellation propagates.
 
-Repeated key presses default to **ignore while running**. Queue, restart-after-cancellation and bounded concurrent policies are available in key properties. Keyboard/audio/OBS/conflicting command resources are serialized across flows. Cancellation cannot reverse external side effects already completed; app launches intentionally outlive their launching action.
+Repeated key presses default to **ignore while running**. Queue, restart-after-cancellation and bounded concurrent policies are available in key properties. Keyboard/audio/OBS/conflicting command resources are serialized across flows. Press/release/hold trigger activity is coordinated separately so release handling can proceed during a press action. Cancellation cannot reverse external side effects already completed; app launches intentionally outlive their launching action.
 
 ## Storage and security
 
-The renderer is sandboxed with context isolation, no Node integration, a restricted preload API, sender checks, validated requests and a Content Security Policy. HID and execution each run in supervised Electron utility processes. This is crash isolation, not a sandbox for user-authored commands.
+The desktop renderer is sandboxed with context isolation, no Node integration, a restricted preload API, sender checks, validated requests and a Content Security Policy. HID, execution and the local web service run in supervised Electron utility processes. This is crash isolation, not a sandbox for user-authored commands.
 
 Configuration and history are stored under Electron's Linux user-data directory (normally `~/.config/decker`). Saves are serialized and atomically replaced. Unsupported schema versions and unreadable configurations are backed up. Images are stored separately by SHA-256. Imports validate the document, graphs and image checksums; review imported commands before activation. Imports back up the current workspace.
 

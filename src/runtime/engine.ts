@@ -19,6 +19,7 @@ export type ActionContext = {
   bindingId?: string;
   generation?: number;
   workflowId: string;
+  deckId?: string;
 };
 export type Handler = (
   action: ActionInstance,
@@ -39,7 +40,7 @@ export class Engine {
     definition: WorkflowDefinition,
     definitions: WorkflowDefinition[],
     inputs: Record<string, Json> = {},
-    binding?: { bindingId: string; generation: number },
+    binding?: { bindingId?: string; generation?: number; deckId?: string },
   ): RunHandle {
     const workflow = structuredClone(definition),
       all = structuredClone(definitions),

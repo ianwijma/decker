@@ -228,3 +228,9 @@ Still to decide during implementation: distribution/license intent, the first Wa
 Existing projects worth studying for behavior: [StreamController](https://github.com/StreamController/StreamController) demonstrates Linux deck UX, plugins, and desktop-specific profile switching; [Companion's module system](https://github.com/bitfocus/companion/blob/main/docs/user-guide/3_config/modules.md) demonstrates separate integration and hardware modules. Use them as design references; this plan does not assume their plugin APIs are interchangeable with Decker's.
 
 **Recommended first implementation slice:** one XL button triggers an HTTP check, selects a success/failure branch, and changes its own key image, while the editor is closed. Pair that vertical slice with the advanced execution fixtures before investing in the full interface.
+
+## Confirmed follow-up: independent decks and LAN web controllers
+
+Confirmed 14 October 2026: left navigation becomes logo, Flows, one custom icon per deck, Add deck, and Settings. Run history belongs under Settings/Diagnostics. Adding a deck defaults to hardware discovery, with immediate web-deck creation as an alternative. Web decks have configurable rows/columns and are operated from phone/tablet browsers without an app installation. The first version is local-network-only and control-only in the browser; configuration remains in the desktop editor.
+
+Decks own their profiles, active pages, icons and geometry; workflows remain shared. Browser actions execute on the Linux host, use the same runtime and observe live feedback. Pairing requires desktop approval and can be revoked. Resizing preserves assignments, migration backs up existing configuration, and editor navigation must not change another deck. See README and docs/ACCEPTANCE.md for implementation details and verification boundaries.

@@ -1,9 +1,9 @@
-import React, { useEffect, lazy, Suspense } from "react";
+import React, { useEffect, useState, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Grid2X2,
   Workflow,
-  History,
+  Plus,
   Settings as SettingsIcon,
   X,
   Command,
@@ -13,7 +13,7 @@ import { Deck } from "./Deck";
 const Flows = lazy(() =>
   import("./Flows").then((module) => ({ default: module.Flows })),
 );
-import { Runs } from "./Runs";
+import { AddDeck } from "./DeckManager";
 import { Settings } from "./Settings";
 import "./styles.css";
 class ErrorBoundary extends React.Component<
@@ -37,7 +37,9 @@ class ErrorBoundary extends React.Component<
   }
 }
 function App() {
-  const { snapshot, receive, tab, setTab, error, setError, saving } = useApp();
+  const { snapshot, receive, tab, setTab, error, setError, saving, request } =
+    useApp();
+  const [adding, setAdding] = useState(false);
   useEffect(() => {
     void window.decker
       .snapshot()
@@ -78,24 +80,60 @@ function App() {
           <Command size={26} />
         </button>
         <div className="rail-divider" />
-        {(
-          [
-            { id: "deck", label: "Deck", icon: Grid2X2 },
-            { id: "flows", label: "Flows", icon: Workflow },
-            { id: "runs", label: "Runs", icon: History },
-          ] as const
-        ).map((item) => (
+        <button
+          className={`rail-item ${tab === "flows" ? "active" : ""}`}
+          title="Flows"
+          aria-label="Flows"
+          onClick={() => setTab("flows")}
+        >
+          <Workflow size={23} />
+          <small>Flows</small>
+        </button>
+        <div className="rail-divider" />
+        <div className="deck-rail-list">
+          {snapshot.document.decks.map((deck) => {
+            const online =
+              deck.kind === "simulator" ||
+              (deck.kind === "web"
+                ? snapshot.web.clients.some(
+                    (c) => c.deckId === deck.id && c.online,
+                  )
+                : snapshot.devices.some(
+                    (d) => d.id === deck.hardwareId && d.connected,
+                  ));
+            return (
+              <button
+                key={deck.id}
+                className={`rail-item deck-rail-item ${tab === "deck" && snapshot.document.activeDeckId === deck.id ? "active" : ""}`}
+                aria-label={`Deck: ${deck.name}`}
+                title={`${deck.name} · ${deck.kind} · ${online ? "connected" : "offline"}`}
+                onClick={() => {
+                  void request({ type: "selectDeck", deckId: deck.id });
+                  setTab("deck");
+                }}
+              >
+                {deck.asset ? (
+                  <img alt="" src={`decker-asset://${deck.asset}`} />
+                ) : (
+                  <span className="deck-rail-icon">{deck.icon || "▦"}</span>
+                )}
+                <small>{deck.name}</small>
+                <i
+                  className={`deck-connection-dot ${online ? "connected" : ""}`}
+                />
+              </button>
+            );
+          })}
           <button
-            key={item.id}
-            title={item.label}
-            aria-label={item.label}
-            className={`rail-item ${tab === item.id ? "active" : ""}`}
-            onClick={() => setTab(item.id)}
+            className="rail-item add-deck-button"
+            aria-label="Add deck"
+            title="Add deck"
+            onClick={() => setAdding(true)}
           >
-            <item.icon size={23} />
-            <small>{item.label}</small>
+            <Plus size={23} />
+            <small>Add deck</small>
           </button>
-        ))}
+        </div>
         <div className="grow" />
         <span className="local-indicator" title="Local workspace" />
         <button
@@ -115,9 +153,7 @@ function App() {
               ? "Deck workspace"
               : tab === "flows"
                 ? "Workflow studio"
-                : tab === "runs"
-                  ? "Run history"
-                  : "Settings"}
+                : "Settings"}
           </strong>
           <span className="topbar-divider" />
           <span>Less clicking. More creating.</span>
@@ -128,9 +164,32 @@ function App() {
           </span>
           <span className="version">v0.1</span>
         </header>
+        {snapshot.web.pending.length > 0 && (
+          <div className="pairing-banner">
+            <span>{snapshot.web.pending.length} browser awaiting approval</span>
+            <button
+              onClick={() => {
+                useApp.getState().setSettingsSection("web");
+                setTab("settings");
+              }}
+            >
+              View pairing requests
+            </button>
+          </div>
+        )}
         <ErrorBoundary>
           {tab === "deck" ? (
-            <Deck />
+            snapshot.document.decks.length ? (
+              <Deck key={snapshot.document.activeDeckId} />
+            ) : (
+              <div className="empty-state">
+                <h1>Create your first deck.</h1>
+                <p>Connect a Stream Deck or create a browser deck.</p>
+                <button className="primary" onClick={() => setAdding(true)}>
+                  Add deck
+                </button>
+              </div>
+            )
           ) : tab === "flows" ? (
             <Suspense
               fallback={
@@ -139,13 +198,12 @@ function App() {
             >
               <Flows />
             </Suspense>
-          ) : tab === "runs" ? (
-            <Runs />
           ) : (
             <Settings />
           )}
         </ErrorBoundary>
       </div>
+      {adding && <AddDeck onClose={() => setAdding(false)} />}
       {error && (
         <div role="alert" className="toast">
           <div>

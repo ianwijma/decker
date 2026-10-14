@@ -10,6 +10,7 @@ export default defineConfig({
           index: resolve("src/main/index.ts"),
           runner: resolve("src/runtime/worker.ts"),
           device: resolve("src/device/worker.ts"),
+          web: resolve("src/web/worker.ts"),
         },
       },
     },
@@ -21,5 +22,16 @@ export default defineConfig({
       },
     },
   },
-  renderer: { plugins: [react(), tailwind()], build: { minify: true } },
+  renderer: {
+    plugins: [react(), tailwind()],
+    build: {
+      minify: true,
+      rollupOptions: {
+        input: {
+          index: resolve("src/renderer/index.html"),
+          web: resolve("src/renderer/web.html"),
+        },
+      },
+    },
+  },
 });

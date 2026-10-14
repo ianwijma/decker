@@ -35,3 +35,14 @@
 ## Scope boundaries retained from the plan
 
 No marketplace plugin compatibility, arbitrary plugin installation, cloud sync, automatic active-window profiles, global shared workflow variables, durable side-effect replay, animation/video backgrounds, or universal Wayland automation. Other Stream Deck models are adapter-compatible candidates, not verified hardware. Distribution licensing and the first supported Wayland compositor remain owner decisions.
+
+## Independent decks and web controls (schema v2)
+
+- Navigation is logo, Flows, each configured deck, Add deck, and Settings. Run history is under Settings → Diagnostics. Decks have editable names, preset/custom icons and uploaded image icons; disconnected hardware stays configured.
+- Every deck owns profile references, active profile/page, geometry and brightness. Actions and run traces capture the originating deck. Selecting an editor deck does not navigate others; stale editor saves preserve runtime navigation from another client.
+- V1 migration is backed up and tested. It preserves original primary-deck binding IDs, gives additional devices independent cloned profiles/IDs, remaps folder/page actions, converts XL indices to coordinates, and retains interrupted-run history handling.
+- Web/simulator geometry is 1–16 rows and columns. Resizing previews out-of-bounds assignments and preserves their coordinates. Hardware geometry comes from discovery. Profile copying remaps local folder/profile references without modifying shared workflows.
+- Local web hosting serves a dedicated operator bundle. Pairing is single-use, expires after two minutes, and needs desktop approval with a matching code. Only hashed approved tokens are stored outside exported workspaces. Browser credentials are HttpOnly/SameSite cookies. Paired browsers are scoped to one deck per pairing, with separate cookies for different decks.
+- Automated server tests cover approval/expiry/reuse, deck scoping, display-only payloads, stale/duplicate/out-of-bounds input, reset/disconnect/revocation/deletion, host/origin checks and asset restrictions. Electron tests exercise desktop creation/icons/resize, a phone-sized browser, real host clipboard execution, independent folder navigation, held-key release after page changes and immediate revocation.
+- The service uses HTTP/WebSocket on a trusted LAN, not encrypted transport. It accepts private/loopback/link-local peers and has no internet relay or browser editor. Decker must stay running. Secure remote access is outside this implementation.
+- Manual gates: actual multi-device HID geometry and reconnects; phone/tablet Safari and Android touch/background behaviour; Wi-Fi reachability, host firewall and changing IP addresses; suspend/resume with paired clients; very large grids and landscape scrolling. Automated browser/packaging checks do not certify these host/network gates.

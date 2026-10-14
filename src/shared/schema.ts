@@ -159,7 +159,7 @@ export const connectionSchema = z.object({
   url: z.string().url(),
   credentialRef: id.optional(),
 });
-export const documentSchema = z.object({
+export const legacyDocumentSchema = z.object({
   schemaVersion: z.literal(1),
   profiles: z.array(profileSchema).min(1).max(100),
   workflows: z.array(workflowSchema).max(200),
@@ -179,6 +179,38 @@ export const documentSchema = z.object({
   activeProfileId: id,
   activePageId: id,
 });
+export const deckSchema = z.object({
+  id,
+  name: z.string().min(1).max(80),
+  kind: z.enum(["hardware", "web", "simulator"]),
+  icon: z.string().max(20).default("▦"),
+  asset: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+  hardwareId: id.optional(),
+  rows: z.number().int().min(1).max(16),
+  columns: z.number().int().min(1).max(16),
+  brightness: z.number().int().min(0).max(100).default(70),
+  profileIds: z.array(id).min(1).max(100),
+  activeProfileId: id,
+  activePageId: id,
+});
+export type DeckConfig = z.infer<typeof deckSchema>;
+export const documentSchema = legacyDocumentSchema
+  .omit({ devices: true, activeProfileId: true, activePageId: true })
+  .extend({
+    schemaVersion: z.literal(2),
+    decks: z.array(deckSchema).max(64),
+    activeDeckId: z.string(),
+    profiles: z.array(profileSchema).max(200),
+    settings: legacyDocumentSchema.shape.settings
+      .omit({ brightness: true, simulator: true })
+      .extend({
+        webEnabled: z.boolean().default(false),
+        webPort: z.number().int().min(0).max(65535).default(9018),
+      }),
+  });
 export type AppDocument = z.infer<typeof documentSchema>;
 export type RunStatus =
   "running" | "success" | "failure" | "cancelled" | "interrupted";
@@ -201,6 +233,7 @@ export type RunRecord = {
   workflowName: string;
   revision: number;
   bindingId?: string;
+  deckId?: string;
   generation?: number;
   startedAt: number;
   endedAt?: number;
@@ -226,22 +259,34 @@ export type Snapshot = {
   capabilities: Capability[];
   observed: Record<string, Json>;
   secureStorage: boolean;
+  web: WebStatus;
 };
 export const requestSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("save"), document: documentSchema }),
+  z.object({
+    type: z.literal("save"),
+    document: documentSchema,
+    navigationEdits: z.array(id).optional(),
+  }),
   z.object({
     type: z.literal("press"),
     key: z.number().int().min(0).max(255),
     down: z.boolean(),
+    deckId: id,
   }),
-  z.object({ type: z.literal("test"), binding: bindingSchema }),
+  z.object({ type: z.literal("test"), binding: bindingSchema, deckId: id }),
   z.object({
     type: z.literal("run"),
     workflowId: id,
     inputs: z.record(z.string(), json).default({}),
+    deckId: id.optional(),
   }),
   z.object({ type: z.literal("cancel"), runId: id }),
-  z.object({ type: z.literal("navigate"), profileId: id, pageId: id }),
+  z.object({
+    type: z.literal("navigate"),
+    deckId: id,
+    profileId: id,
+    pageId: id,
+  }),
   z.object({ type: z.literal("import") }),
   z.object({ type: z.literal("export") }),
   z.object({ type: z.literal("asset") }),
@@ -253,6 +298,27 @@ export const requestSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("diagnose") }),
   z.object({ type: z.literal("clearHistory") }),
+  z.object({ type: z.literal("selectDeck"), deckId: id }),
+  z.object({
+    type: z.literal("addDeck"),
+    kind: z.enum(["hardware", "web", "simulator"]),
+    name: z.string().min(1).max(80),
+    icon: z.string().max(20),
+    hardwareId: id.optional(),
+    rows: z.number().int().min(1).max(16),
+    columns: z.number().int().min(1).max(16),
+  }),
+  z.object({ type: z.literal("deleteDeck"), deckId: id }),
+  z.object({ type: z.literal("copyProfile"), fromProfileId: id, toDeckId: id }),
+  z.object({ type: z.literal("invite"), deckId: id }),
+  z.object({
+    type: z.literal("approvePairing"),
+    pairingId: id,
+    approved: z.boolean(),
+  }),
+  z.object({ type: z.literal("revokeClient"), clientId: id }),
+  z.object({ type: z.literal("openWeb"), url: z.string().url() }),
+  z.object({ type: z.literal("copyWebLink"), url: z.string().url() }),
 ]);
 export type Request = z.infer<typeof requestSchema>;
 export interface DeckerAPI {
@@ -267,6 +333,7 @@ export const runRecordSchema: z.ZodType<RunRecord> = z.object({
   workflowName: z.string(),
   revision: z.number().int().positive(),
   bindingId: id.optional(),
+  deckId: id.optional(),
   generation: z.number().int().optional(),
   startedAt: z.number(),
   endedAt: z.number().optional(),
@@ -296,3 +363,43 @@ export const runRecordSchema: z.ZodType<RunRecord> = z.object({
     )
     .max(1000),
 });
+
+export type WebKey = {
+  label: string;
+  icon: string;
+  background: string;
+  asset?: string;
+};
+export type WebDeckView = {
+  id: string;
+  name: string;
+  rows: number;
+  columns: number;
+  pageName: string;
+  version: string;
+  accent: string;
+  keys: Record<string, WebKey>;
+};
+export type WebClient = {
+  id: string;
+  deckId: string;
+  name: string;
+  createdAt: number;
+  lastSeen: number;
+  online: boolean;
+};
+export type PairingRequest = {
+  id: string;
+  deckId: string;
+  name: string;
+  code: string;
+  expiresAt: number;
+};
+export type WebStatus = {
+  running: boolean;
+  port: number;
+  urls: string[];
+  error?: string;
+  clients: WebClient[];
+  pending: PairingRequest[];
+};

@@ -6,10 +6,14 @@ export function Runs() {
     [selected, setSelected] = useState(""),
     [filter, setFilter] = useState("all"),
     [query, setQuery] = useState(""),
+    [deckFilter, setDeckFilter] = useState("all"),
+    [workflowFilter, setWorkflowFilter] = useState("all"),
     all = [...snapshot!.runs].reverse(),
     runs = all.filter(
       (r) =>
         (filter === "all" || r.status === filter) &&
+        (deckFilter === "all" || r.deckId === deckFilter) &&
+        (workflowFilter === "all" || r.workflowId === workflowFilter) &&
         r.workflowName.toLowerCase().includes(query.toLowerCase()),
     ),
     run = all.find((r) => r.id === selected) ?? runs[0];
@@ -42,6 +46,36 @@ export function Runs() {
             <strong>{m.value}</strong>
           </div>
         ))}
+      </div>
+      <div className="row run-filters">
+        <select
+          aria-label="Filter runs by deck"
+          value={deckFilter}
+          onChange={(e) => setDeckFilter(e.target.value)}
+        >
+          <option value="all">All decks</option>
+          {snapshot!.document.decks.map((deck) => (
+            <option value={deck.id} key={deck.id}>
+              {deck.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Filter runs by workflow"
+          value={workflowFilter}
+          onChange={(e) => setWorkflowFilter(e.target.value)}
+        >
+          <option value="all">All workflows</option>
+          {[
+            ...new Map(
+              all.map((r) => [r.workflowId, r.workflowName]),
+            ).entries(),
+          ].map(([id, name]) => (
+            <option value={id} key={id}>
+              {name}
+            </option>
+          ))}
+        </select>
       </div>
       <div className="runs-layout">
         <section className="run-list">
@@ -125,7 +159,9 @@ export function Runs() {
               <p className="muted small">
                 {run.id}
                 <br />
-                Revision {run.revision} ·{" "}
+                {snapshot!.document.decks.find((d) => d.id === run.deckId)
+                  ?.name ?? "Software run"}{" "}
+                · Revision {run.revision} ·{" "}
                 {((run.endedAt ?? Date.now()) - run.startedAt) / 1000}s
               </p>
               {run.error && <div className="error-box">{run.error}</div>}
