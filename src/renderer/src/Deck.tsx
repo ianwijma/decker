@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import {
   Copy,
   FolderPlus,
@@ -23,6 +23,8 @@ import { SearchableDropdown } from "./SearchableDropdown";
 import { selectIcon } from "../../shared/icons";
 import { KeyIcon } from "./KeyIcon";
 import { IconPicker } from "./IconPicker";
+import { ToggleEditor } from "./ToggleEditor";
+import { selectToggle, toggleDisplay } from "../../shared/toggle-presentation";
 export function Deck() {
   const { snapshot, edit, request } = useApp(),
     doc = snapshot!.document,
@@ -36,6 +38,13 @@ export function Deck() {
     page = profile.pages.find((p) => p.id === deck.activePageId)!;
   const slot = keySlot(selected, deck.columns),
     key = page.keys[slot];
+  const imageEpoch = useRef(0);
+  useLayoutEffect(() => {
+    imageEpoch.current++;
+  }, [deck.id, page.id, slot, key?.id, JSON.stringify(key?.appearance)]);
+  const display = key
+    ? toggleDisplay(key, selectToggle(snapshot!.toggles ?? [], key, deck.id))
+    : undefined;
   const device = snapshot!.devices.find(
     (d) => d.id === (deck.hardwareId ?? deck.id),
   );
@@ -50,7 +59,7 @@ export function Deck() {
     );
   const update = (fn: (key: KeyBinding) => void) =>
     keys((all) => {
-      if (all[slot]) fn(all[slot]);
+      if (all[slot] && all[slot].id === key?.id) fn(all[slot]);
     });
   const assign = (type: string, index = selected) =>
     keys((all) => {
@@ -227,23 +236,31 @@ export function Deck() {
                         snapshot!.observed,
                         doc.settings.accent,
                         deck.id,
+                        snapshot!.toggles,
                       ),
                     }
                   : undefined,
                 run = b
                   ? selectBindingRun(snapshot!.runs, b, deck.id)
                   : undefined;
+              const toggle = b
+                ? toggleDisplay(
+                    b,
+                    selectToggle(snapshot!.toggles ?? [], b, deck.id),
+                  )
+                : undefined;
               return (
                 <button
                   key={index}
-                  aria-label={`Key ${index + 1}${b ? `: ${b.appearance.label}` : ""}`}
+                  aria-label={`Key ${index + 1}${b ? `: ${b.appearance.label}` : ""}${toggle ? ` · ${toggle.summary}` : ""}`}
                   aria-pressed={selected === index}
-                  aria-busy={run?.status === "running"}
+                  aria-busy={toggle?.busy || run?.status === "running"}
                   className={`deck-key ${selected === index ? "selected" : ""} ${run?.status === "running" ? "running" : ""}`}
                   style={{ backgroundColor: b?.appearance.background }}
                   onClick={() => setSelected(index)}
                   onDoubleClick={() =>
                     b &&
+                    !toggle?.disabled &&
                     void request({ type: "test", deckId: deck.id, binding: b })
                   }
                   onDragOver={(e) => e.preventDefault()}
@@ -272,6 +289,11 @@ export function Deck() {
                     />
                   )}
                   <span className="key-label">{b?.appearance.label ?? ""}</span>
+                  {b?.appearance.stateLabel && (
+                    <small className="toggle-key-state">
+                      {b.appearance.stateLabel}
+                    </small>
+                  )}
                   <span className="key-index">
                     {String(index + 1).padStart(2, "0")}
                   </span>
@@ -459,6 +481,7 @@ export function Deck() {
         </div>
         {key ? (
           <>
+            {key.toggle && <small>Authored base preview</small>}
             <div
               className="selected-key-preview"
               style={{ backgroundColor: key.appearance.background }}
@@ -509,8 +532,9 @@ export function Deck() {
             <button
               className="wide"
               onClick={async () => {
+                const token = ++imageEpoch.current;
                 const asset = await request({ type: "asset" });
-                if (typeof asset === "string")
+                if (imageEpoch.current === token && typeof asset === "string")
                   update((k) => {
                     k.appearance.asset = asset;
                   });
@@ -529,103 +553,118 @@ export function Deck() {
                 Remove image
               </button>
             )}
-            <div className="segmented">
-              {(["press", "release", "longPress"] as const).map((type) => (
-                <button
-                  key={type}
-                  className={event === type ? "active" : ""}
-                  onClick={() => setEvent(type)}
-                >
-                  {type === "longPress"
-                    ? "Hold"
-                    : type === "press"
-                      ? "Press"
-                      : "Release"}
-                </button>
-              ))}
-            </div>
-            <TargetEditor
-              target={key[event]}
-              workflows={doc.workflows}
-              onChange={(target) =>
-                update((k) => {
-                  k[event] = target;
-                })
-              }
+            <ToggleEditor
+              key={`${deck.id}:${page.id}:${slot}:${key.id}`}
+              binding={key}
+              deckId={deck.id}
+              onSave={update}
             />
-            <details>
-              <summary>Behaviour & feedback</summary>
-              <FieldLabel label="Repeated presses">
-                <select
-                  aria-label="Repeated presses"
-                  value={key.policy}
-                  onChange={(e) =>
+            {!key.toggle && (
+              <>
+                <div className="segmented">
+                  {(["press", "release", "longPress"] as const).map((type) => (
+                    <button
+                      key={type}
+                      className={event === type ? "active" : ""}
+                      onClick={() => setEvent(type)}
+                    >
+                      {type === "longPress"
+                        ? "Hold"
+                        : type === "press"
+                          ? "Press"
+                          : "Release"}
+                    </button>
+                  ))}
+                </div>
+                <TargetEditor
+                  target={key[event]}
+                  workflows={doc.workflows}
+                  onChange={(target) =>
                     update((k) => {
-                      k.policy = e.target.value as KeyBinding["policy"];
-                    })
-                  }
-                >
-                  <option value="ignore">Ignore while running</option>
-                  <option value="queue">Bounded FIFO queue</option>
-                  <option value="restart">Cancel then restart</option>
-                  <option value="concurrent">Bounded concurrent runs</option>
-                </select>
-              </FieldLabel>
-              <FieldLabel label="Queue / concurrency limit">
-                <input
-                  type="number"
-                  min={1}
-                  max={16}
-                  value={key.limit}
-                  onChange={(e) =>
-                    update((k) => {
-                      k.limit = Number(e.target.value);
+                      k[event] = target;
                     })
                   }
                 />
-              </FieldLabel>
-              <FieldLabel label="Hold threshold (ms)">
-                <input
-                  type="number"
-                  min={200}
-                  max={10000}
-                  value={key.longPressMs}
-                  onChange={(e) =>
-                    update((k) => {
-                      k.longPressMs = Number(e.target.value);
-                    })
-                  }
-                />
-              </FieldLabel>
-              <small className="muted">
-                When a hold action exists, short press runs on release. Release
-                uses the original binding.
-              </small>
-              {(["success", "error"] as const).map((state) => (
-                <FieldLabel label={`${state} colour`} key={state}>
-                  <input
-                    type="color"
-                    value={key.appearance[state]}
+              </>
+            )}
+            {!key.toggle && (
+              <details>
+                <summary>Behaviour & feedback</summary>
+                <FieldLabel label="Repeated presses">
+                  <select
+                    aria-label="Repeated presses"
+                    value={key.policy}
                     onChange={(e) =>
                       update((k) => {
-                        k.appearance[state] = e.target.value;
+                        k.policy = e.target.value as KeyBinding["policy"];
+                      })
+                    }
+                  >
+                    <option value="ignore">Ignore while running</option>
+                    <option value="queue">Bounded FIFO queue</option>
+                    <option value="restart">Cancel then restart</option>
+                    <option value="concurrent">Bounded concurrent runs</option>
+                  </select>
+                </FieldLabel>
+                <FieldLabel label="Queue / concurrency limit">
+                  <input
+                    type="number"
+                    min={1}
+                    max={16}
+                    value={key.limit}
+                    onChange={(e) =>
+                      update((k) => {
+                        k.limit = Number(e.target.value);
                       })
                     }
                   />
                 </FieldLabel>
-              ))}
-            </details>
-            <button
-              className="primary wide"
-              onClick={() =>
-                void request({ type: "test", deckId: deck.id, binding: key })
-              }
-            >
-              <Play size={16} /> Test action
-            </button>
+                <FieldLabel label="Hold threshold (ms)">
+                  <input
+                    type="number"
+                    min={200}
+                    max={10000}
+                    value={key.longPressMs}
+                    onChange={(e) =>
+                      update((k) => {
+                        k.longPressMs = Number(e.target.value);
+                      })
+                    }
+                  />
+                </FieldLabel>
+                <small className="muted">
+                  When a hold action exists, short press runs on release.
+                  Release uses the original binding.
+                </small>
+                {(["success", "error"] as const).map((state) => (
+                  <FieldLabel label={`${state} colour`} key={state}>
+                    <input
+                      type="color"
+                      value={key.appearance[state]}
+                      onChange={(e) =>
+                        update((k) => {
+                          k.appearance[state] = e.target.value;
+                        })
+                      }
+                    />
+                  </FieldLabel>
+                ))}
+              </details>
+            )}
+            {!key.toggle && (
+              <button
+                className="primary wide"
+                onClick={() =>
+                  void request({ type: "test", deckId: deck.id, binding: key })
+                }
+              >
+                <Play size={16} /> Test action
+              </button>
+            )}
             {deck.kind === "simulator" && (
               <button
                 className="wide"
+                disabled={display?.disabled || useApp.getState().saving}
                 onPointerDown={(e) => {
                   e.currentTarget.setPointerCapture(e.pointerId);
                   void request({

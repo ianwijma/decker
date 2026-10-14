@@ -60,7 +60,10 @@ const frameSchema = z.object({
   rows: z.number().int().positive().optional(),
   columns: z.number().int().positive().optional(),
   brightness: z.number().int().min(0).max(100),
-  page: z.record(z.string(), appearanceSchema),
+  page: z.record(
+    z.string(),
+    appearanceSchema.extend({ stateLabel: z.string().max(40).optional() }),
+  ),
 });
 const schema = z.discriminatedUnion("type", [
   z.object({

@@ -60,9 +60,13 @@ const main = async (
       },
     });
   });
-const obs = new ObsConnections((id, value) =>
-  send({ type: "observed", id: `obs:${id}`, value }),
-);
+let observations: Record<string, Json> = {};
+function observation(id: string, value: Json) {
+  observations[id] = value;
+  toggles.updateObservations(observations);
+  send({ type: "observed", id, value });
+}
+const obs = new ObsConnections((id, value) => observation(`obs:${id}`, value));
 const standalone = new Map<string, RunHandle>();
 const activeRuns = new Set<string>();
 const queuedRecords = new Map<string, import("../shared/schema").RunRecord>();
@@ -169,14 +173,16 @@ const schema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("diagnose") }),
   z.object({ type: z.literal("stop") }),
 ]);
+let configurationEpoch = 0;
 let diagnosing = false;
 async function diagnose() {
   if (diagnosing) return;
   diagnosing = true;
+  const captured = document;
   try {
     const capabilities = await probe();
     send({ type: "capabilities", capabilities });
-    for (const connection of document.connections)
+    for (const connection of captured.connections)
       try {
         await obs.get(
           connection,
@@ -185,11 +191,8 @@ async function diagnose() {
             : undefined,
         );
       } catch (error) {
-        send({
-          type: "observed",
-          id: `obs:${connection.id}`,
-          value: { connected: false, error: String(error) },
-        });
+        if (captured === document)
+          observation(`obs:${connection.id}`, { connected: false });
       }
   } finally {
     diagnosing = false;
@@ -200,14 +203,21 @@ port.on("message", async (event) => {
     const message = schema.parse(event.data);
     switch (message.type) {
       case "configure": {
+        const epoch = ++configurationEpoch;
         const changed =
           JSON.stringify(document.connections) !==
             JSON.stringify(message.document.connections) ||
           JSON.stringify(credentials) !== JSON.stringify(message.credentials);
         document = message.document;
         credentials = message.credentials;
+        if (changed) {
+          for (const id of Object.keys(observations))
+            if (id.startsWith("obs:")) delete observations[id];
+          await obs.close();
+        }
+        if (epoch !== configurationEpoch) break;
         toggles.configure(document, message.activateToggles);
-        if (changed) await obs.close();
+        toggles.updateObservations(observations);
         void diagnose();
         break;
       }
@@ -311,17 +321,16 @@ setInterval(async () => {
   if (observing) return;
   observing = true;
   try {
-    send({ type: "observed", id: "microphone", value: await observedAudio() });
-    send({
-      type: "observed",
-      id: "speaker",
-      value: await observedAudio(false),
-    });
-    send({
-      type: "observed",
-      id: "media",
-      value: await observedMedia().catch(() => ({ unavailable: true })),
-    });
+    const captured = document;
+    const [microphone, speaker, media] = await Promise.all([
+      observedAudio(),
+      observedAudio(false),
+      observedMedia().catch(() => ({ unavailable: true })),
+    ]);
+    if (captured !== document) return;
+    observation("microphone", microphone);
+    observation("speaker", speaker);
+    observation("media", media);
   } finally {
     observing = false;
   }

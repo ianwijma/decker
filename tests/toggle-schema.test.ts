@@ -61,7 +61,7 @@ function fixture() {
   return { doc, b };
 }
 it.each([1, 2, 3])(
-  "migrates version %i in order to v4 without synthesizing toggles or changing saved targets",
+  "migrates version %i in order to v5 without synthesizing toggles or changing saved targets",
   async (version) => {
     const doc = defaults();
     const old = { ...doc, schemaVersion: version };
@@ -85,13 +85,13 @@ it.each([1, 2, 3])(
           : legacy;
     }
     const migrated = migrateDocument(value);
-    expect(migrated.schemaVersion).toBe(4);
+    expect(migrated.schemaVersion).toBe(5);
     expect(
       migrated.profiles
         .flatMap((p) => p.pages.flatMap((page) => Object.values(page.keys)))
         .every((b) => !b.toggle),
     ).toBe(true);
-    if (version === 3) expect(migrated).toEqual({ ...doc, schemaVersion: 4 });
+    if (version === 3) expect(migrated).toEqual({ ...doc, schemaVersion: 5 });
     else
       expect(migrated.profiles[0].pages[0].keys[2].press).toEqual({
         kind: "workflow",
@@ -100,7 +100,7 @@ it.each([1, 2, 3])(
     const dir = await directory();
     await writeFile(join(dir, "config.json"), JSON.stringify(value));
     const store = new Persistence(dir);
-    expect((await store.load()).document).toMatchObject({ schemaVersion: 4 });
+    expect((await store.load()).document).toMatchObject({ schemaVersion: 5 });
     expect(
       (await readdir(dir)).filter((f) => f.startsWith("migration-backup-")),
     ).toHaveLength(1);
@@ -111,23 +111,23 @@ it.each([1, 2, 3])(
     expect(
       JSON.parse(await readFile(join(dir, "config.json"), "utf8"))
         .schemaVersion,
-    ).toBe(4);
+    ).toBe(5);
   },
 );
 it("retains an explicit v3 decoder and preserves future documents instead of stripping unsupported data", async () => {
   const { doc } = fixture();
   expect(() => v3DocumentSchema.parse({ ...doc, schemaVersion: 3 })).toThrow();
-  expect(() => documentSchema.parse({ ...doc, schemaVersion: 5 })).toThrow();
+  expect(() => documentSchema.parse({ ...doc, schemaVersion: 6 })).toThrow();
   const dir = await directory(),
     raw = JSON.stringify({
       ...doc,
-      schemaVersion: 5,
+      schemaVersion: 6,
       future: { secret: "untouched" },
     });
   await writeFile(join(dir, "config.json"), raw);
   const store = new Persistence(dir),
     loaded = await store.load();
-  expect(loaded.warning).toContain("Unsupported schema version 5");
+  expect(loaded.warning).toContain("Unsupported schema version 6");
   await expect(store.save(defaults(), [])).rejects.toThrow(
     "writes are blocked",
   );
@@ -145,7 +145,7 @@ it("rejects conflicting toggle inputs without dropping any saved assignments", (
   }
   expect(bindingSchema.parse(b).toggle).toEqual(b.toggle);
 });
-it("round trips v4 documents while export/import/copy allocate fresh toggle identities and carry no runtime state", async () => {
+it("round trips current documents while export/import/copy allocate fresh toggle identities and carry no runtime state", async () => {
   const { doc, b } = fixture(),
     dir = await directory(),
     store = new Persistence(dir);
@@ -307,7 +307,7 @@ it("rejects stale durable commits after replacement or generation changes", asyn
   await expect(
     store.request({ ...request, operation: "commit", confirmed: "on" }, doc),
   ).rejects.toThrow("Stale toggle identity");
-  expect(validateDocument(doc).schemaVersion).toBe(4);
+  expect(validateDocument(doc).schemaVersion).toBe(5);
 });
 
 it("imports native command argv and existing templates in every toggle target without changing their grammar", () => {

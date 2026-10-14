@@ -120,7 +120,7 @@ it("preserves tokens, text, aliases and image bytes across save/reload, copy, ex
       JSON.parse(JSON.stringify(exported.document)),
     );
     await persistence.importAssets(exported.assets);
-    expect(imported.schemaVersion).toBe(4);
+    expect(imported.schemaVersion).toBe(5);
     expect(imported.workflowAliases).toEqual(doc.workflowAliases);
     expect(imported.profiles[0].pages[0].keys[0].appearance).toEqual(
       key.appearance,

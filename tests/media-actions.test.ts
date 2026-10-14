@@ -121,7 +121,7 @@ it("round trips new and legacy media values, appearance and aliases without migr
     const reloaded = (await store.load()).document;
     const imported = validateImport((await store.export(reloaded)).document);
     expect(imported).toEqual(doc);
-    expect(imported.schemaVersion).toBe(4);
+    expect(imported.schemaVersion).toBe(5);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -4,6 +4,7 @@ import {
   documentSchema,
   v2DocumentSchema,
   v3DocumentSchema,
+  v4DocumentSchema,
   legacyDocumentSchema,
   type AppDocument,
   type DeckConfig,
@@ -72,9 +73,14 @@ export function cloneProfiles(profiles: AppDocument["profiles"]) {
 }
 export function migrateDocument(value: unknown): AppDocument {
   const version = (value as { schemaVersion?: number })?.schemaVersion;
-  if (version === 4) return documentSchema.parse(value);
-  if (version === 3)
+  if (version === 5) return documentSchema.parse(value);
+  if (version === 4)
     return documentSchema.parse({
+      ...v4DocumentSchema.parse(value),
+      schemaVersion: 5,
+    });
+  if (version === 3)
+    return migrateDocument({
       ...v3DocumentSchema.parse(value),
       schemaVersion: 4,
     });
@@ -85,10 +91,9 @@ export function migrateDocument(value: unknown): AppDocument {
   )
     throw new Error("Workflow aliases require schema version 3");
   if (version === 2)
-    return documentSchema.parse({
-      ...migrateWorkflowIdentities(v2DocumentSchema.parse(value)),
-      schemaVersion: 4,
-    });
+    return migrateDocument(
+      migrateWorkflowIdentities(v2DocumentSchema.parse(value)),
+    );
   if (version !== 1) throw new Error(`Unsupported schema version ${version}`);
   const old = legacyDocumentSchema.parse(value),
     decks: DeckConfig[] = [],
@@ -155,8 +160,8 @@ export function migrateDocument(value: unknown): AppDocument {
     simulator: _simulator,
     ...settings
   } = old.settings;
-  return documentSchema.parse({
-    ...migrateWorkflowIdentities(
+  return migrateDocument(
+    migrateWorkflowIdentities(
       v2DocumentSchema.parse({
         ...old,
         schemaVersion: 2,
@@ -166,8 +171,7 @@ export function migrateDocument(value: unknown): AppDocument {
         settings: { ...settings, webEnabled: false, webPort: 9018 },
       }),
     ),
-    schemaVersion: 4,
-  });
+  );
 }
 
 // Storage uses fixed 16-column coordinates so resizing never moves/deletes existing keys.

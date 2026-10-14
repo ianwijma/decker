@@ -2,13 +2,14 @@ import type {
   StreamDeck,
   StreamDeckDeviceInfo,
 } from "@elgato-stream-deck/node";
-import type { DeviceStatus, DeviceState, KeyBinding } from "../shared/schema";
+import type { ButtonAppearance } from "../shared/feedback";
+import type { DeviceStatus, DeviceState } from "../shared/schema";
 
 export type Frame = {
   deckId: string;
   hardwareId: string;
   brightness: number;
-  page: Record<string, KeyBinding["appearance"]>;
+  page: Record<string, ButtonAppearance>;
   name?: string;
   rows?: number;
   columns?: number;
@@ -40,7 +41,7 @@ type Session = {
   retry?: ReturnType<typeof setTimeout>;
   failures: number;
 };
-const blank: KeyBinding["appearance"] = {
+const blank: ButtonAppearance = {
   label: "",
   icon: "",
   background: "#111214",
@@ -95,7 +96,7 @@ export class DeviceSessions {
       discover(): Promise<StreamDeckDeviceInfo[]>;
       open(path: string): Promise<DeviceTransport>;
       render(
-        appearance: KeyBinding["appearance"],
+        appearance: ButtonAppearance,
         size: number,
         directory: string,
       ): Promise<Buffer>;

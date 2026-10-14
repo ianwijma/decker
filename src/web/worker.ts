@@ -16,6 +16,16 @@ const view = z.object({
   keys: z.record(
     z.string(),
     z.object({
+      stateLabel: z.string().max(40).optional(),
+      toggle: z
+        .object({
+          confirmed: z.enum(["on", "off", "unknown"]),
+          busy: z.boolean(),
+          disabled: z.boolean(),
+          summary: z.string().max(400),
+        })
+        .strict()
+        .optional(),
       label: z.string(),
       icon: z.string(),
       background: z.string().regex(/^#[a-f0-9]{6}$/i),

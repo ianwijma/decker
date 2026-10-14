@@ -128,7 +128,7 @@ test("captured permission failure has truthful badges, device details and workin
       connected: false,
       configured: true,
     });
-    expect(result.document.schemaVersion).toBe(4);
+    expect(result.document.schemaVersion).toBe(5);
   } finally {
     await app.close();
     await rm(directory, { recursive: true, force: true });

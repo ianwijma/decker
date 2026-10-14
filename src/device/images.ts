@@ -1,11 +1,11 @@
 import sharp from "sharp";
 import { createHash } from "node:crypto";
-import type { KeyBinding } from "../shared/schema";
+import type { ButtonAppearance } from "../shared/feedback";
 import { escapeSvg as escape, packKeySvg } from "../shared/icons";
 export class Images {
   private cache = new Map<string, Buffer>();
   async render(
-    appearance: KeyBinding["appearance"],
+    appearance: ButtonAppearance,
     size: number,
     asset?: Buffer,
   ): Promise<Buffer> {
@@ -18,8 +18,11 @@ export class Images {
     const label = escape(appearance.label.slice(0, 24)),
       icon = escape(appearance.icon.slice(0, 4)),
       pack = packKeySvg(appearance.icon, appearance.label);
+    const state = appearance.stateLabel
+      ? `<rect width="100%" height="18%" fill="#000000" opacity=".8"/><text x="50%" y="13%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.08}" fill="white">${escape(appearance.stateLabel)}</text>`
+      : "";
     const svg = Buffer.from(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><rect width="100%" height="100%" fill="${appearance.background}"/>${pack ?? `<text x="50%" y="43%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.3}" fill="white">${icon}</text><text x="50%" y="80%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.12}" fill="white">${label}</text>`}</svg>`,
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><rect width="100%" height="100%" fill="${appearance.background}"/>${state}${pack ?? `<text x="50%" y="43%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.3}" fill="white">${icon}</text><text x="50%" y="80%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.12}" fill="white">${label}</text>`}</svg>`,
     );
     const base = asset
       ? sharp(asset)
@@ -27,7 +30,7 @@ export class Images {
           .composite([
             {
               input: Buffer.from(
-                `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><rect y="${size * 0.7}" width="100%" height="30%" fill="#000000" opacity=".65"/><text x="50%" y="88%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.12}" fill="white">${label}</text></svg>`,
+                `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">${state}<rect y="${size * 0.7}" width="100%" height="30%" fill="#000000" opacity=".65"/><text x="50%" y="88%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.12}" fill="white">${label}</text></svg>`,
               ),
             },
           ])

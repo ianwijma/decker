@@ -59,6 +59,8 @@ import {
   type WebDeckView,
 } from "../shared/schema";
 import { Triggers } from "../device/triggers";
+import { bindingExecutionIdentity } from "../shared/toggle-identity";
+import { selectToggle, toggleDisplay } from "../shared/toggle-presentation";
 import { buttonAppearance } from "../shared/feedback";
 import { ButtonActivity } from "../runtime/activity";
 import { redact } from "../runtime/data";
@@ -244,12 +246,18 @@ function deckAppearance(deckId: string) {
       { ...observed, buttonFeedback: feedback.snapshot() },
       document.settings.accent,
       deckId,
+      toggleStates,
     );
     keys[i] = {
       label: appearance.label,
       icon: appearance.icon,
       background: appearance.background,
       asset: appearance.asset,
+      stateLabel: appearance.stateLabel,
+      toggle: toggleDisplay(
+        binding,
+        selectToggle(toggleStates, binding, deckId),
+      ),
     };
   }
   return keys;
@@ -593,7 +601,10 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
             });
         }
       } else if (message.type === "toggles") {
+        const changed =
+          JSON.stringify(toggleStates) !== JSON.stringify(message.states);
         toggleStates = message.states;
+        if (changed) configureDevice();
         publish();
       } else if (message.type === "run") {
         const record = message.record as RunRecord,
@@ -820,8 +831,8 @@ async function handleRequest(request: Request) {
             }
             if (old)
               b.generation =
-                JSON.stringify({ ...old, generation: 0 }) ===
-                JSON.stringify({ ...b, generation: 0 })
+                JSON.stringify(bindingExecutionIdentity(old)) ===
+                JSON.stringify(bindingExecutionIdentity(b))
                   ? old.generation
                   : old.generation + 1;
           }
@@ -868,10 +879,30 @@ async function handleRequest(request: Request) {
       });
       return null;
     case "activateToggles":
-    case "reconcileToggle":
-    case "recoverToggle":
       post("runner", request);
       return null;
+    case "reconcileToggle":
+    case "recoverToggle": {
+      const saved = toggleBindings(document).find(
+        (entry) =>
+          entry.deckId === request.deckId &&
+          entry.binding.id === request.bindingId,
+      )?.binding;
+      if (
+        !saved ||
+        (request.generation !== undefined &&
+          saved.generation !== request.generation) ||
+        (request.type === "reconcileToggle" &&
+          request.expectedToggle &&
+          JSON.stringify(saved.toggle) !==
+            JSON.stringify(request.expectedToggle))
+      )
+        throw new Error(
+          "Toggle configuration changed; reopen the saved key and retry.",
+        );
+      post("runner", request);
+      return null;
+    }
     case "cancel":
       post("runner", { type: "cancel", id: request.runId });
       return null;
