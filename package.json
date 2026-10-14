@@ -63,6 +63,7 @@
     },
     "files": [
       "out/**/*",
+      "src/shared/icon-notices.txt",
       "package.json"
     ],
     "asarUnpack": [
