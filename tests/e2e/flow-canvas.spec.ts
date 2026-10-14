@@ -316,9 +316,31 @@ test("multi-selection drags every node, persists keyboard moves, and deletes con
     .toBe(moved[first.id].x + 5);
   await page.keyboard.press("Backspace");
   await expect(page.locator(".react-flow__node")).toHaveCount(1);
-  const saved = await page.evaluate(() => window.decker.snapshot());
-  expect(saved.document.workflows[0].graph.edges).toEqual([]);
-  expect(Object.keys(saved.document.workflows[0].layout)).toEqual([third.id]);
+  // The canvas updates optimistically; connected-edge and node deletions save
+  // through the serialized queue. Check the complete saved state after both.
+  await expect
+    .poll(async () => {
+      const saved = await page.evaluate(() => window.decker.snapshot());
+      const workflow = saved.document.workflows[0];
+      return {
+        nodes: workflow.graph.nodes.map((n) => n.id),
+        edges: workflow.graph.edges,
+        layout: Object.keys(workflow.layout),
+      };
+    })
+    .toEqual({ nodes: [third.id], edges: [], layout: [third.id] });
+  await expect(
+    page.getByText("All changes saved", { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await openFlow();
+  await expect(page.locator(".react-flow__node")).toHaveCount(1);
+  await expect(page.locator(".react-flow__node")).toHaveAttribute(
+    "data-id",
+    third.id,
+  );
+  await expect(page.locator(".react-flow__minimap-node")).toHaveCount(1);
+  expect(Object.keys(await layout(page))).toEqual([third.id]);
 });
 
 test("workflow switches and nested scopes reset canvas state and keep saved positions", async () => {
