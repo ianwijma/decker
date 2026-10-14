@@ -138,7 +138,7 @@ test("General retains preferences and transfer entry points while decks stay in 
     page.getByLabel("OBS password entry", { exact: true }),
   ).toHaveAttribute("type", "password");
   await expect(
-    page.getByRole("button", { name: "Save secret", exact: true }),
+    page.getByRole("button", { name: "Save connection", exact: true }),
   ).toBeDisabled();
 
   // Exercise both entry points without opening a native dialog or importing data.

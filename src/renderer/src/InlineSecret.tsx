@@ -92,30 +92,14 @@ export function InlineSecret({
               ? "Configured · stored with OS encryption"
               : "Missing · enter a password or token"}
       </p>
-      <label className="field">
-        <span>{label} entry</span>
-        <input
-          aria-label={`${label} entry`}
-          type="password"
-          autoComplete="new-password"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-        />
-      </label>
-      <label className="checkbox-row">
-        <input
-          type="checkbox"
-          checked={Boolean(state?.persistent) && persist}
-          disabled={!state?.persistent}
-          onChange={(e) => setPersist(e.target.checked)}
-        />{" "}
-        Store with OS encryption
-      </label>
-      <small>
-        {state?.persistent
-          ? "Uncheck for session-only storage."
-          : "Secure storage is unavailable. Saving explicitly uses session-only storage."}
-      </small>
+      <SecretEntry
+        label={label}
+        value={value}
+        onChange={setValue}
+        persistent={Boolean(state?.persistent)}
+        persist={persist}
+        onPersist={setPersist}
+      />
       <div className="row">
         <button
           type="button"
@@ -163,5 +147,52 @@ export function ActionSecretOwners() {
           ))}
       </details>
     )
+  );
+}
+
+// Shared presentation only; committed owners retain their owner+epoch submit path.
+export function SecretEntry({
+  label,
+  value,
+  onChange,
+  persistent,
+  persist,
+  onPersist,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  persistent: boolean;
+  persist: boolean;
+  onPersist: (value: boolean) => void;
+}) {
+  return (
+    <>
+      <label className="field">
+        <span>{label} entry</span>
+        <input
+          aria-label={`${label} entry`}
+          type="password"
+          autoComplete="new-password"
+          maxLength={16000}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </label>
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          checked={persistent && persist}
+          disabled={!persistent}
+          onChange={(e) => onPersist(e.target.checked)}
+        />{" "}
+        Store with OS encryption
+      </label>
+      <small>
+        {persistent
+          ? "Uncheck for session-only storage."
+          : "Secure storage is unavailable. Saving explicitly uses session-only storage."}
+      </small>
+    </>
   );
 }

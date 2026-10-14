@@ -76,7 +76,8 @@ export const useApp = create<State>((set, get) => ({
       });
   },
   request: async (request) => {
-    const credential = request.type === "credential";
+    const credential =
+      request.type === "credential" || request.type === "obsSave";
     if (credential && credentialPending) return undefined;
     if (credential) credentialPending = true;
     try {

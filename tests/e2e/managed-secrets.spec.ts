@@ -37,19 +37,23 @@ test.afterEach(async () => {
 test("inline connection and HTTP secrets survive editing without exposing values, share safely, and become missing after session restart", async () => {
   let page = await launch();
   await page.getByRole("button", { name: "Add OBS" }).click();
-  const password = page.getByRole("group", {
-    name: "OBS password",
+  const draft = page.getByRole("group", {
+    name: "New OBS connection",
     exact: true,
   });
   await expect(
-    password.getByRole("button", { name: "Save secret", exact: true }),
+    draft.getByRole("button", { name: "Save connection", exact: true }),
   ).toBeDisabled();
-  await password
+  await draft
     .getByLabel("OBS password entry", { exact: true })
     .fill("synthetic-inline-password");
-  await password
-    .getByRole("button", { name: "Save secret", exact: true })
+  await draft
+    .getByRole("button", { name: "Save connection", exact: true })
     .click();
+  const password = page
+    .locator(".connection")
+    .first()
+    .getByRole("group", { name: "OBS password", exact: true });
   await expect(
     password.getByLabel("OBS password entry", { exact: true }),
   ).toHaveValue("");
@@ -77,6 +81,9 @@ test("inline connection and HTTP secrets survive editing without exposing values
     return { original: c.credentialRef, connectionId: c.id };
   });
   expect(refs.original).toMatch(/^managed:/);
+  // The direct fixture save returns before its published renderer snapshot.
+  // Wait for that current epoch before exercising the protected owner control.
+  await expect(page.locator(".connection")).toHaveCount(2);
   const first = page.locator(".connection").first();
   await first
     .getByRole("button", { name: "Remove secret", exact: true })
@@ -135,6 +142,10 @@ test("inline connection and HTTP secrets survive editing without exposing values
 test("desktop IPC rejects stale/deleted owners, direct ref mutation and competing updates without attaching to another owner", async () => {
   const page = await launch();
   await page.getByRole("button", { name: "Add OBS" }).click();
+  await page.getByLabel("Password choice").selectOption("none");
+  await page
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
   await expect(page.locator(".connection")).toHaveCount(1);
   const results = await page.evaluate(async () => {
     const snapshot = await window.decker.snapshot(),
