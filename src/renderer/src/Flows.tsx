@@ -1,3 +1,10 @@
+import {
+  bindingChoices,
+  actionOutputDescription,
+} from "../../shared/data-presentation";
+import { nodeAuditHints } from "../../shared/node-audit";
+import { DataPreview } from "./DataPreview";
+import { ControlDataHelper } from "./ControlDataHelper";
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
@@ -273,6 +280,13 @@ export const Flows = memo(function Flows() {
   }, [workflow?.id]);
   const graph = workflow ? at(workflow.graph, path) : undefined,
     current = graph?.nodes.find((n) => n.id === selected);
+  const choices = useMemo(
+    () =>
+      workflow && current
+        ? bindingChoices(workflow, path, current.id, workflows, aliases)
+        : [],
+    [workflow, path, current?.id, workflows, aliases],
+  );
   const update = (fn: (workflow: WorkflowDefinition, graph: Graph) => void) => {
     if (workflow)
       edit((d) => {
@@ -569,7 +583,27 @@ export const Flows = memo(function Flows() {
                     }
                   />
                 </FieldLabel>
-                <small className="muted code">ID: {current.id}</small>
+                <details>
+                  <summary>Advanced node identity</summary>
+                  <small className="muted code">ID: {current.id}</small>
+                </details>
+                <p className="muted small">{nodeAuditHints[current.kind]}</p>
+                {current.action && (
+                  <p className="muted small">
+                    Output: {actionOutputDescription(current.action.type)}
+                  </p>
+                )}
+                <DataPreview
+                  key={JSON.stringify([
+                    "preview",
+                    workflow.id,
+                    path,
+                    current.id,
+                  ])}
+                  workflow={workflow}
+                  path={path}
+                  nodeId={current.id}
+                />
                 {current.kind === "action" && current.action && (
                   <>
                     <ActionSelect
@@ -589,16 +623,13 @@ export const Flows = memo(function Flows() {
                         })
                       }
                       bindings
-                      available={[
-                        ...workflow.inputs.map((i) => `inputs.${i}`),
-                        ...graph!.nodes
-                          .filter((n) => n.id !== selected)
-                          .map((n) => `outputs.${n.id}`),
-                        "vars",
-                        "item",
-                        "index",
-                        "error",
-                      ]}
+                      key={JSON.stringify([
+                        workflow.id,
+                        path,
+                        current.id,
+                        current.action.type,
+                      ])}
+                      choices={choices}
                     />
                   </>
                 )}
@@ -673,6 +704,23 @@ export const Flows = memo(function Flows() {
                             : current.kind === "foreach"
                               ? "items accepts an array or a data reference. concurrency: 1–16."
                               : 'Use { "$ref": "outputs.node-id.field", "fallback": null } to bind data.'
+                    }
+                  />
+                )}
+                {current.kind !== "action" && current.kind !== "trigger" && (
+                  <ControlDataHelper
+                    key={JSON.stringify([
+                      "config-helper",
+                      workflow.id,
+                      path,
+                      current.id,
+                    ])}
+                    node={current}
+                    choices={choices}
+                    onChange={(config) =>
+                      updateNode((n) => {
+                        n.config = config;
+                      })
                     }
                   />
                 )}

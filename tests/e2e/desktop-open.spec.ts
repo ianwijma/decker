@@ -275,6 +275,7 @@ test("workflow bindings resolve normally, cancellation preserves objects, and st
   });
   await page.getByRole("button", { name: "Flows", exact: true }).click();
   await page.locator('.react-flow__node[data-id="open1"]').click();
+  await page.getByText("File path advanced JSON", { exact: true }).click();
   const bound = page.getByRole("textbox", {
     name: "File path binding",
     exact: true,
@@ -309,8 +310,8 @@ test("workflow bindings resolve normally, cancellation preserves objects, and st
     page.getByRole("textbox", { name: "File path", exact: true }),
   ).toHaveValue("/tmp/你好 file.txt");
   await page
-    .getByRole("combobox", { name: "Bind File path", exact: true })
-    .selectOption("vars");
+    .getByRole("combobox", { name: "File path value mode", exact: true })
+    .selectOption("reference");
   await bound.fill(JSON.stringify({ $ref: "vars.targets.path" }));
   await bound.blur();
   await saved(page);

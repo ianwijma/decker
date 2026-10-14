@@ -128,6 +128,7 @@ test("edits JSON path/template fields, saves and relaunches, and delivers the fe
     )
     .toEqual(["stats", "subscribers"]);
   await page.locator('.react-flow__node[data-id="notify"]').click();
+  await page.getByText("Message advanced JSON", { exact: true }).click();
   const message = page.getByRole("textbox", {
     name: "Message binding",
     exact: true,

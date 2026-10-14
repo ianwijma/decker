@@ -63,10 +63,18 @@ async function upload(page: Page) {
   await page
     .getByRole("button", { name: "Choose image…", exact: true })
     .click();
+  const savedAsset = async () =>
+    (await page.evaluate(() => window.decker.snapshot())).document.profiles[0]
+      .pages[0].keys[0].appearance.asset;
+  // The preview paints optimistically; wait for the upload's document commit.
+  await expect.poll(savedAsset).toEqual(expect.any(String));
+  const asset = (await savedAsset())!;
   await saved(page);
-  await expect(page.locator(".selected-key-preview img")).toBeVisible();
-  return (await page.evaluate(() => window.decker.snapshot())).document
-    .profiles[0].pages[0].keys[0].appearance.asset!;
+  await expect(page.locator(".selected-key-preview img")).toHaveAttribute(
+    "src",
+    `decker-asset://${asset}`,
+  );
+  return asset;
 }
 
 test("searches and selects by keyboard; switches images, pack, custom text and clear; copies, exports/imports and reloads", async () => {
