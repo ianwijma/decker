@@ -18,6 +18,7 @@ import { ArrowLeft, Play, Plus, Search, Square, Trash2 } from "lucide-react";
 import { useApp } from "./store";
 import { node, uid } from "../../shared/defaults";
 import { paletteCatalog, makeAction } from "../../shared/catalog";
+import { MediaIcon } from "./MediaIcon";
 import type {
   FlowNode,
   Graph,
@@ -399,23 +400,33 @@ export const Flows = memo(function Flows() {
               <Plus size={13} />
             </button>
           ))}
-        <h3 className="palette-heading">Actions</h3>
-        {paletteCatalog
-          .filter((a) => a.name.toLowerCase().includes(search.toLowerCase()))
-          .map((a) => (
-            <button
-              key={a.id}
-              className="catalog-action"
-              aria-label={`Add ${a.name} node`}
-              onClick={() => add("action", a.name, a.id)}
-            >
-              <span className={`action-icon group-${a.group.toLowerCase()}`}>
-                {a.icon}
-              </span>
-              {a.name}
-              <Plus size={13} />
-            </button>
-          ))}
+        {["Actions", "Media"].map((group) => (
+          <div key={group}>
+            <h3 className="palette-heading">{group}</h3>
+            {paletteCatalog
+              .filter(
+                (a) =>
+                  (a.group === "Media") === (group === "Media") &&
+                  a.name.toLowerCase().includes(search.toLowerCase()),
+              )
+              .map((a) => (
+                <button
+                  key={a.id}
+                  className="catalog-action"
+                  aria-label={`Add ${a.name} node`}
+                  onClick={() => add("action", a.name, a.id)}
+                >
+                  <span
+                    className={`action-icon group-${a.group.toLowerCase()}`}
+                  >
+                    {a.group === "Media" ? <MediaIcon icon={a.icon} /> : a.icon}
+                  </span>
+                  {a.name}
+                  <Plus size={13} />
+                </button>
+              ))}
+          </div>
+        ))}
       </aside>
       <main className="flow-main">
         {workflow ? (

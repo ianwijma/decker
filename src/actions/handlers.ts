@@ -5,6 +5,7 @@ import type { Handler, ActionContext } from "../runtime/engine";
 import { ResourceLocks } from "../runtime/coordinator";
 import { audio, command, media } from "../adapters/linux/system";
 import { ObsConnections } from "../integrations/obs";
+import { mediaAction } from "../shared/media";
 export function handlers(
   getDocument: () => AppDocument,
   secrets: () => Record<string, string>,
@@ -43,6 +44,9 @@ export function handlers(
       };
     const perform = async (): Promise<Json> => {
       context.signal.throwIfAborted();
+      const descriptor = mediaAction(action.type, c);
+      if (descriptor)
+        return media(descriptor.operation, s("player"), context.signal);
       switch (action.type) {
         case "app.launch":
           return new Promise((resolve, reject) => {
@@ -83,8 +87,6 @@ export function handlers(
             context.signal,
           );
         }
-        case "media.control":
-          return media(s("operation"), s("player"), context.signal);
         case "audio.control":
           return audio(
             s("operation"),

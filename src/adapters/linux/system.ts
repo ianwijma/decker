@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { execa } from "execa";
-import dbus from "dbus-next";
 import { desktopProbe } from "./diagnostics";
+import { players } from "./media";
 import type { Capability, Json } from "../../shared/schema";
 export async function command(
   executable: string,
@@ -59,65 +59,7 @@ export async function command(
 export async function probe(): Promise<Capability[]> {
   return desktopProbe(players);
 }
-async function busCall<T>(
-  fn: (bus: ReturnType<typeof dbus.sessionBus>) => Promise<T>,
-): Promise<T> {
-  const bus = dbus.sessionBus();
-  bus.on("error", () => {});
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      fn(bus),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error("Session D-Bus timed out")),
-          2000,
-        );
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-    bus.disconnect();
-  }
-}
-export async function players(): Promise<string[]> {
-  return busCall(async (bus) => {
-    const object = await bus.getProxyObject(
-      "org.freedesktop.DBus",
-      "/org/freedesktop/DBus",
-    );
-    const names = (await object
-      .getInterface("org.freedesktop.DBus")
-      .ListNames()) as string[];
-    return names.filter((n) => n.startsWith("org.mpris.MediaPlayer2.")).sort();
-  });
-}
-export async function media(
-  operation: string,
-  player: string,
-  signal: AbortSignal,
-): Promise<Json> {
-  const names = await players(),
-    name = player || names[0];
-  if (!name || !names.includes(name))
-    throw new Error("Media player disappeared or is unavailable");
-  if (
-    !["PlayPause", "Play", "Pause", "Next", "Previous", "Stop"].includes(
-      operation,
-    )
-  )
-    throw new Error("Unsupported media operation");
-  signal.throwIfAborted();
-  return busCall(async (bus) => {
-    const object = await bus.getProxyObject(name, "/org/mpris/MediaPlayer2");
-    signal.throwIfAborted();
-    await object.getInterface("org.mpris.MediaPlayer2.Player")[operation]();
-    const status = await object
-      .getInterface("org.freedesktop.DBus.Properties")
-      .Get("org.mpris.MediaPlayer2.Player", "PlaybackStatus");
-    return { player: name, status: String(status.value) };
-  });
-}
+export { players, media, observedMedia } from "./media";
 export async function audio(
   operation: string,
   target: string,
@@ -211,24 +153,4 @@ export async function observedAudio(source = true): Promise<Json> {
       return { unavailable: true };
     }
   }
-}
-
-export async function observedMedia(): Promise<Json> {
-  const names = await players();
-  return busCall(async (bus) => {
-    const result: Record<string, Json> = { defaultPlayer: names[0] ?? "" };
-    await Promise.allSettled(
-      names.map(async (name) => {
-        const object = await bus.getProxyObject(
-          name,
-          "/org/mpris/MediaPlayer2",
-        );
-        const status = await object
-          .getInterface("org.freedesktop.DBus.Properties")
-          .Get("org.mpris.MediaPlayer2.Player", "PlaybackStatus");
-        result[name] = String(status.value);
-      }),
-    );
-    return result;
-  });
 }
