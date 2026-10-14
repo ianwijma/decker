@@ -180,13 +180,17 @@ describe("scope and presentation contract", () => {
         const sample = Object.fromEntries(
           Object.entries(output.fields).map(([key, type]) => [
             key,
-            type === "number"
-              ? 0
-              : type === "boolean"
-                ? false
-                : type === "text"
-                  ? ""
-                  : null,
+            key === "operation" && def.id.startsWith("file.")
+              ? def.id === "file.appendText"
+                ? "append"
+                : "overwrite"
+              : type === "number"
+                ? 0
+                : type === "boolean"
+                  ? false
+                  : type === "text"
+                    ? ""
+                    : null,
           ]),
         );
         expect(def.outputSchema.safeParse(sample).success).toBe(true);

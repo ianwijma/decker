@@ -18,7 +18,7 @@ import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { openDesktopTarget } from "./desktop-open";
-import { pickDesktopFile } from "./desktop-file-picker";
+import { pickDesktopFile, pickDesktopDestination } from "./desktop-file-picker";
 import sharp from "sharp";
 import { createHash } from "node:crypto";
 import {
@@ -988,6 +988,10 @@ async function handleRequest(request: Request) {
       return snapshot();
     }
     case "pickFile":
+      if (request.picker === "saveFile")
+        return pickDesktopDestination((options) =>
+          dialog.showSaveDialog(window!, options),
+        );
       return pickDesktopFile((options) =>
         dialog.showOpenDialog(window!, options),
       );

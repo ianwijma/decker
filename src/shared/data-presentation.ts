@@ -32,6 +32,17 @@ export type DataChoice = {
 export const choiceId = (choice: Pick<DataChoice, "path">) =>
   JSON.stringify(choice.path);
 const outputFields: Record<string, Record<string, DataType>> = {
+  "file.readText": { text: "text", bytes: "number", truncated: "boolean" },
+  "file.writeText": {
+    bytesWritten: "number",
+    created: "boolean",
+    operation: "text",
+  },
+  "file.appendText": {
+    bytesWritten: "number",
+    created: "boolean",
+    operation: "text",
+  },
   "http.request": { status: "number", body: "text", truncated: "boolean" },
   "data.parseJson": { value: "JSON" },
   "data.extract": { value: "JSON" },

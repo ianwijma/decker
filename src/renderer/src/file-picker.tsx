@@ -29,12 +29,14 @@ export function FilePickerButton({
   scope,
   action,
   fieldKey,
+  picker = "openFile",
   label,
   onSelect,
 }: {
   scope: string;
   action: ActionInstance;
   fieldKey: string;
+  picker?: "openFile" | "saveFile";
   label: string;
   onSelect: (path: string) => void;
 }) {
@@ -51,7 +53,7 @@ export function FilePickerButton({
     return () => {
       revision.current++;
     };
-  }, [scope, fingerprint, fieldKey]);
+  }, [scope, fingerprint, fieldKey, picker]);
   return (
     <button
       type="button"
@@ -63,7 +65,7 @@ export function FilePickerButton({
         try {
           const path = await window.decker.request({
             type: "pickFile",
-            picker: "openFile",
+            picker,
           });
           if (revision.current === token && typeof path === "string")
             select.current(path);
@@ -75,7 +77,11 @@ export function FilePickerButton({
         }
       }}
     >
-      {pending ? "Choosing…" : "Choose file…"}
+      {pending
+        ? "Choosing…"
+        : picker === "saveFile"
+          ? "Choose destination…"
+          : "Choose file…"}
     </button>
   );
 }

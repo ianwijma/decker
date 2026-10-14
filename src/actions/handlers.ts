@@ -1,5 +1,6 @@
 import { decodeArgs } from "../shared/data-contract";
 import { extractValue, parseJson } from "../shared/data-actions";
+import { textFileActions } from "./text-files";
 import { readHttpBody } from "./http-body";
 import { lookupSecret, protectSecret } from "../shared/secret-redaction";
 import { spawn } from "node:child_process";
@@ -41,6 +42,10 @@ export function handlers(
       if (descriptor)
         return media(descriptor.operation, s("player"), context.signal);
       switch (action.type) {
+        case "file.readText":
+        case "file.writeText":
+        case "file.appendText":
+          return textFileActions.execute(action.type, c, context.signal);
         case "data.parseJson":
           return parseJson(c.input);
         case "data.extract":
