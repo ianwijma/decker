@@ -13,6 +13,11 @@ npm ci
 npm run dev
 ```
 
+The install step downloads the Electron binary before checking native modules.
+`npm run dev` also ensures the binary is installed, repairing existing installs
+that otherwise fail with `Error: Electron uninstall`. The first download needs
+network access; subsequent runs reuse the installed binary.
+
 The simulator is enabled by default. Select a key and choose or drag an action from the library. Double-click a key or use **Test action** to execute it. **Hold simulated key** exercises press, release and long-press bindings. Actions really execute on the local desktop, including in simulator mode.
 
 - **Deck:** profiles, pages, nested folders, labels, images, multi-actions, trigger bindings and concurrency policies.
