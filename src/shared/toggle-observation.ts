@@ -46,3 +46,47 @@ export function observedToggle(
         : source.property;
   return typeof state[key] === "boolean" ? state[key] : undefined;
 }
+
+/** Named choices only for truth the current adapter actually exposes. */
+export function observedObsTargets(
+  source: Extract<ObservationSource, { kind: "obs" }>,
+  observed: Record<string, Json>,
+): { id: string; name: string; sourceId?: number }[] {
+  const state = observed[`obs:${source.connectionId}`] as
+    Record<string, Json> | undefined;
+  if (!state?.connected) return [];
+  const choices = new Map<
+    string,
+    { id: string; name: string; sourceId?: number }
+  >();
+  const add = (name: string, sourceId?: number) => {
+    if (!name || name.length > 200) return;
+    const id = JSON.stringify([name, sourceId ?? null]);
+    choices.set(id, {
+      id,
+      name,
+      ...(sourceId === undefined ? {} : { sourceId }),
+    });
+  };
+  if (source.property === "scene" && typeof state.scene === "string")
+    add(state.scene);
+  for (const [key, value] of Object.entries(state)) {
+    if (
+      source.property === "mute" &&
+      key.startsWith("mute:") &&
+      typeof value === "boolean"
+    )
+      add(key.slice(5));
+    const match = /^source:(.+):(\d+)$/.exec(key);
+    if (match && typeof value === "boolean") {
+      if (source.property === "scene") add(match[1]);
+      else if (source.property === "source") add(match[1], Number(match[2]));
+    }
+  }
+  return [...choices.values()]
+    .slice(0, 4096)
+    .sort(
+      (a, b) =>
+        a.name.localeCompare(b.name) || (a.sourceId ?? 0) - (b.sourceId ?? 0),
+    );
+}

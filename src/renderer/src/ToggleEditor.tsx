@@ -8,6 +8,7 @@ import {
   type ToggleConfig,
 } from "../../shared/schema";
 import { makeAction } from "../../shared/catalog";
+import { observedObsTargets } from "../../shared/toggle-observation";
 import { buttonAppearance } from "../../shared/feedback";
 import {
   selectToggle,
@@ -83,6 +84,10 @@ export function ToggleEditor({
   const source = config?.source;
   const observation =
     source?.kind === "observed" ? source.observation : undefined;
+  const obsTargets =
+    observation?.kind === "obs"
+      ? observedObsTargets(observation, snapshot!.observed)
+      : [];
   const save = () => {
     if (!draft) return;
     const next = {
@@ -490,22 +495,56 @@ export function ToggleEditor({
                   {["scene", "mute", "source"].includes(
                     observation.property,
                   ) && (
-                    <FieldLabel label="Observed OBS name">
-                      <input
-                        aria-label="Observed OBS name"
-                        maxLength={200}
-                        value={observation.name}
-                        onChange={(e) =>
-                          change((d) => {
-                            if (
-                              d.source.kind === "observed" &&
-                              d.source.observation.kind === "obs"
-                            )
-                              d.source.observation.name = e.target.value;
-                          })
-                        }
+                    <>
+                      <SearchableDropdown
+                        label="Observed OBS target"
+                        searchLabel="Search observed OBS targets"
+                        hideIds
+                        value={JSON.stringify([
+                          observation.name,
+                          observation.property === "source"
+                            ? (observation.sourceId ?? null)
+                            : null,
+                        ])}
+                        options={obsTargets.map((target) => ({
+                          id: target.id,
+                          name:
+                            target.sourceId === undefined
+                              ? target.name
+                              : `${target.name} / item ${target.sourceId}`,
+                        }))}
+                        missingLabel="Target unavailable — retained below"
+                        onSelect={(id) => {
+                          const target = obsTargets.find((t) => t.id === id);
+                          if (target)
+                            change((d) => {
+                              if (
+                                d.source.kind === "observed" &&
+                                d.source.observation.kind === "obs"
+                              ) {
+                                d.source.observation.name = target.name;
+                                d.source.observation.sourceId = target.sourceId;
+                              }
+                            });
+                        }}
                       />
-                    </FieldLabel>
+                      <FieldLabel label="Observed OBS name">
+                        <input
+                          aria-label="Observed OBS name"
+                          maxLength={200}
+                          value={observation.name}
+                          onChange={(e) =>
+                            change((d) => {
+                              if (
+                                d.source.kind === "observed" &&
+                                d.source.observation.kind === "obs"
+                              )
+                                d.source.observation.name = e.target.value;
+                            })
+                          }
+                        />
+                      </FieldLabel>
+                    </>
                   )}
                   {observation.property === "source" && (
                     <FieldLabel label="Observed scene item ID">

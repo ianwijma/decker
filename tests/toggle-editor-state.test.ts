@@ -13,7 +13,10 @@ import {
   type Target,
 } from "../src/shared/schema";
 import { bindingExecutionIdentity } from "../src/shared/toggle-identity";
-import { observedToggle } from "../src/shared/toggle-observation";
+import {
+  observedToggle,
+  observedObsTargets,
+} from "../src/shared/toggle-observation";
 import {
   stateAppearance,
   toggleDisplay,
@@ -498,4 +501,37 @@ it("exports on/off-only assets and validates observed connection references", as
       },
     }),
   ).toThrow();
+});
+
+it("offers named OBS targets only for exposed observations, preserving names containing colons", () => {
+  const observation: Extract<ObservationSource, { kind: "obs" }> = {
+    kind: "obs",
+    connectionId: "studio",
+    property: "source",
+    name: "",
+  };
+  const observed = {
+    "obs:studio": {
+      connected: true,
+      scene: "Current",
+      "source:Scene:with:colons:12": true,
+      "mute:Mic:one": false,
+      "source:unsupported:1": "unknown",
+    },
+  };
+  expect(observedObsTargets(observation, observed)).toEqual([
+    {
+      id: JSON.stringify(["Scene:with:colons", 12]),
+      name: "Scene:with:colons",
+      sourceId: 12,
+    },
+  ]);
+  expect(
+    observedObsTargets({ ...observation, property: "mute" }, observed),
+  ).toEqual([{ id: JSON.stringify(["Mic:one", null]), name: "Mic:one" }]);
+  expect(
+    observedObsTargets(observation, {
+      "obs:studio": { ...observed["obs:studio"], connected: false },
+    }),
+  ).toEqual([]);
 });

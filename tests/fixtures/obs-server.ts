@@ -86,6 +86,15 @@ export async function fakeObs(
   return {
     url: `ws://127.0.0.1:${(server.address() as { port: number }).port}`,
     frames,
+    emit: (eventType: string, eventData: Record<string, unknown>) => {
+      for (const socket of server.clients)
+        socket.send(
+          JSON.stringify({
+            op: 5,
+            d: { eventType, eventIntent: 1, eventData },
+          }),
+        );
+    },
     get connections() {
       return connections;
     },

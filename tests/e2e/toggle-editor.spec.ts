@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { binding, defaults } from "../../src/shared/defaults";
 import type { AppDocument, Target } from "../../src/shared/schema";
+import { fakeObs } from "../fixtures/obs-server";
 import { toggleStamp } from "../../src/runtime/targets";
 import { toggleKey } from "../../src/shared/toggle-contract";
 let app: ElectronApplication, page: Page, directory: string;
@@ -537,4 +538,96 @@ test("cosmetic saves preserve a running transition while executable replacement 
     )
     .toBe("cancelled");
   expect(await readFile(marker, "utf8")).toBe("on");
+});
+
+test("named OBS observations reconcile events, retain missing choices and keep replacement sources inactive until refresh", async () => {
+  const server = await fakeObs();
+  try {
+    const doc = defaults(),
+      b = binding("desktop.copy", "OBS observed");
+    delete b.press;
+    doc.connections = [
+      { id: "obs-fixture", name: "Studio fixture", url: server.url },
+    ];
+    b.toggle = {
+      on: command("true"),
+      off: command("true"),
+      source: {
+        kind: "observed",
+        observation: {
+          kind: "obs",
+          connectionId: "obs-fixture",
+          property: "scene",
+          name: "Fixture scene",
+        },
+        onWhen: true,
+      },
+      appearance: {
+        on: { label: "Scene active" },
+        off: { label: "Other scene" },
+      },
+    };
+    doc.profiles[0].pages[0].keys = { 0: b };
+    await launch(doc);
+    await expect.poll(state).toMatchObject({ confirmed: "on", fresh: true });
+    await expect(
+      page.getByRole("button", { name: "OBS connection: Studio fixture" }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Observed OBS target: Fixture scene" })
+      .click();
+    await expect(
+      page.getByRole("option", { name: "Fixture scene", exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("combobox", { name: "Search observed OBS targets" })
+      .press("Escape");
+    server.emit("CurrentProgramSceneChanged", { sceneName: "Other" });
+    await expect.poll(state).toMatchObject({ confirmed: "off", fresh: true });
+    await expect(
+      page.getByRole("button", { name: /^Key 1: Other scene/ }),
+    ).toBeVisible();
+    await expect(
+      page.getByLabel("Observed OBS name", { exact: true }),
+    ).toHaveValue("Fixture scene");
+    await page
+      .getByLabel("Observed OBS property", { exact: true })
+      .selectOption("streaming");
+    await page
+      .getByLabel("On-state meaning", { exact: true })
+      .selectOption("false");
+    await page
+      .getByRole("button", { name: "Save toggle configuration" })
+      .click();
+    await expect
+      .poll(state)
+      .toMatchObject({ confirmed: "unknown", fresh: false });
+    server.emit("StreamStateChanged", {
+      outputActive: true,
+      outputState: "OBS_WEBSOCKET_OUTPUT_STARTED",
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async () =>
+            (await window.decker.snapshot()).observed["obs:obs-fixture"],
+        ),
+      )
+      .toMatchObject({ streaming: true });
+    expect(await state()).toMatchObject({ confirmed: "unknown", fresh: false });
+    await page
+      .getByRole("button", { name: "Test / Refresh saved state" })
+      .click();
+    await expect.poll(state).toMatchObject({ confirmed: "off", fresh: true });
+    await server.close();
+    await expect.poll(state).toMatchObject({ confirmed: "off", fresh: false });
+    await expect(
+      page.getByRole("button", { name: "Execute saved toggle" }),
+    ).toBeDisabled();
+    expect((await page.evaluate(() => window.decker.snapshot())).runs).toEqual(
+      [],
+    );
+  } finally {
+    await server.close().catch(() => {});
+  }
 });
