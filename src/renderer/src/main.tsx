@@ -48,11 +48,24 @@ function App() {
     setAdding(true);
   };
   useEffect(() => {
+    let active = true;
+    let receivedLive = false;
+    const unsubscribe = window.decker.subscribe((snapshot) => {
+      receivedLive = true;
+      if (active) receive(snapshot);
+    });
     void window.decker
       .snapshot()
-      .then(receive)
-      .catch((e) => setError(String(e)));
-    return window.decker.subscribe(receive);
+      .then((snapshot) => {
+        if (active && !receivedLive) receive(snapshot);
+      })
+      .catch((e) => {
+        if (active && !receivedLive) setError(String(e));
+      });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [receive, setError]);
   useEffect(() => {
     if (!snapshot) return;

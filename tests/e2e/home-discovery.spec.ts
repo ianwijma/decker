@@ -158,6 +158,51 @@ async function requests() {
 const homeButton = () =>
   page.getByRole("button", { name: "Decker home", exact: true });
 
+test("a delayed startup snapshot cannot overwrite a newer live overview", async () => {
+  const stale = await baseFixture();
+  await app.evaluate(({ ipcMain }, json) => {
+    const context = globalThis as unknown as {
+      initialReplies: (() => void)[];
+    };
+    context.initialReplies = [];
+    ipcMain.removeHandler("decker:snapshot");
+    ipcMain.handle(
+      "decker:snapshot",
+      () =>
+        new Promise((resolve) => {
+          context.initialReplies.push(() => resolve(JSON.parse(json)));
+        }),
+    );
+  }, JSON.stringify(stale));
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect
+    .poll(() =>
+      app.evaluate(
+        () =>
+          (globalThis as unknown as { initialReplies: (() => void)[] })
+            .initialReplies.length,
+      ),
+    )
+    .toBeGreaterThan(0);
+  const latest = structuredClone(stale);
+  latest.document.decks[0].name = "Latest workspace";
+  await installFixture(latest);
+  const deck = page.getByRole("article", {
+    name: "Deck overview: Latest workspace",
+  });
+  await expect(deck).toBeVisible();
+  await app.evaluate(() => {
+    const context = globalThis as unknown as { initialReplies: (() => void)[] };
+    context.initialReplies.splice(0).forEach((reply) => reply());
+  });
+  // This IPC round trip runs after the delayed replies have been delivered.
+  await page.evaluate(() => window.decker.snapshot());
+  await expect(deck).toBeVisible();
+  await expect(
+    page.getByRole("article", { name: "Deck overview: My XL" }),
+  ).toHaveCount(0);
+});
+
 test("generic Add deck from Home still creates simulator and web decks through real IPC", async () => {
   for (const [kind, name, create] of [
     ["Simulator", "Software test", "Create simulator"],
