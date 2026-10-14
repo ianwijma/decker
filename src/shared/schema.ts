@@ -241,7 +241,14 @@ export type RunRecord = {
   nodes: NodeExecutionRecord[];
   error?: string;
 };
-export type Capability = { id: string; available: boolean; detail: string };
+export type Capability = {
+  id: string;
+  available: boolean;
+  detail: string;
+  state?: import("./health").HealthState;
+  remedy?: import("./health").RemedyId;
+  distribution?: string;
+};
 export type DeviceStatus = {
   id: string;
   name: string;
@@ -281,6 +288,7 @@ export type Snapshot = {
   devices: DeviceStatus[];
   capabilities: Capability[];
   observed: Record<string, Json>;
+  health?: import("./health").HealthRecord[];
   secureStorage: boolean;
   web: WebStatus;
 };
@@ -320,6 +328,11 @@ export const requestSchema = z.discriminatedUnion("type", [
     persist: z.boolean(),
   }),
   z.object({ type: z.literal("diagnose") }),
+  z.object({
+    type: z.literal("diagnosticRemedy"),
+    healthId: id,
+    action: z.enum(["copy", "open"]),
+  }),
   z.object({ type: z.literal("retryDevice"), hardwareId: id }),
   z.object({ type: z.literal("clearHistory") }),
   z.object({ type: z.literal("selectDeck"), deckId: id }),

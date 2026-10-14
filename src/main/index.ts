@@ -42,6 +42,14 @@ import {
 import { Triggers } from "../device/triggers";
 import { observedAppearance } from "../shared/feedback";
 import { redact } from "../runtime/data";
+import {
+  buildHealth,
+  obsCapability,
+  DiagnosticFaults,
+  redactDiagnostics,
+  remedyFor,
+} from "../shared/health";
+const diagnosticFaults = new DiagnosticFaults();
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "decker-asset",
@@ -82,32 +90,56 @@ const workers = new Map<
 >();
 let publishTimer: ReturnType<typeof setTimeout> | undefined,
   persistTimer: ReturnType<typeof setTimeout> | undefined;
-const snapshot = (): Snapshot => ({
-  document,
-  runs,
-  devices: [
-    ...devices,
-    ...document.decks
-      .filter((d) => d.kind === "simulator")
-      .map((d) => ({
-        id: d.id,
-        name: d.name,
-        connected: true,
-        present: true,
-        configured: true,
-        state: "ready" as const,
-        updatedAt: Date.now(),
-        simulated: true,
-        rows: d.rows,
-        columns: d.columns,
-        iconSize: 96,
-      })),
-  ],
-  web: webStatus,
-  capabilities,
-  observed,
-  secureStorage: credentials.secure,
-});
+const snapshot = (): Snapshot => {
+  const secrets = Object.values(credentials?.all() ?? {});
+  const safeObserved = Object.fromEntries(
+    Object.entries({
+      ...observed,
+      diagnostics: diagnosticFaults.snapshot(),
+    }).map(([key, value]) => [key, redactDiagnostics(value, secrets)]),
+  );
+  const safeDevices = devices.map(
+    (device) => redactDiagnostics(device, secrets) as typeof device,
+  );
+  const currentCapabilities = [
+    ...capabilities.filter((c) => c.id !== "obs"),
+    obsCapability({ document, observed: safeObserved }),
+  ];
+  const health = buildHealth({
+    document,
+    devices: safeDevices,
+    capabilities: currentCapabilities,
+    observed: safeObserved,
+    web: webStatus,
+  }).map((record) => redactDiagnostics(record, secrets) as typeof record);
+  return {
+    document,
+    runs,
+    devices: [
+      ...safeDevices,
+      ...document.decks
+        .filter((d) => d.kind === "simulator")
+        .map((d) => ({
+          id: d.id,
+          name: d.name,
+          connected: true,
+          present: true,
+          configured: true,
+          state: "ready" as const,
+          updatedAt: Date.now(),
+          simulated: true,
+          rows: d.rows,
+          columns: d.columns,
+          iconSize: 96,
+        })),
+    ],
+    web: webStatus,
+    capabilities: currentCapabilities,
+    observed: safeObserved,
+    health,
+    secureStorage: credentials.secure,
+  };
+};
 function publish() {
   if (publishTimer) return;
   publishTimer = setTimeout(() => {
@@ -117,23 +149,26 @@ function publish() {
       window.webContents.send("decker:snapshot", snapshot());
   }, 40);
 }
-function diagnostic(error: unknown) {
-  observed = {
-    ...observed,
-    diagnostic: String(
-      redact(
-        error instanceof Error ? error.message : String(error),
-        Object.values(credentials?.all() ?? {}),
-      ),
-    ),
-  };
+function diagnostic(error: unknown, id = "main", feature = "Application") {
+  diagnosticFaults.set(
+    id,
+    feature,
+    error,
+    Object.values(credentials?.all() ?? {}),
+  );
   publish();
 }
 function persist() {
   if (persistTimer) return;
   persistTimer = setTimeout(() => {
     persistTimer = undefined;
-    void store.save(document, runs).catch(diagnostic);
+    void store
+      .save(document, runs)
+      .then(() => {
+        diagnosticFaults.clear("persistence");
+        publish();
+      })
+      .catch((error) => diagnostic(error, "persistence", "Workspace storage"));
   }, 250);
 }
 function post(name: string, message: unknown) {
@@ -295,6 +330,12 @@ function configureDevice() {
   configureWeb();
 }
 function configure() {
+  for (const key of Object.keys(observed))
+    if (
+      key.startsWith("obs:") &&
+      !document.connections.some((c) => `obs:${c.id}` === key)
+    )
+      delete observed[key];
   post("runner", {
     type: "configure",
     document,
@@ -306,8 +347,9 @@ function configure() {
 const triggers = new Triggers((binding, target, deckId, phase) => {
   try {
     post("runner", { type: "trigger", binding, target, deckId, phase });
+    diagnosticFaults.clear("trigger");
   } catch (error) {
-    diagnostic(error);
+    diagnostic(error, "trigger", "Key actions");
   }
 });
 function navigate(deckId: string, profileId: string, pageId: string) {
@@ -410,6 +452,8 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
   child.on("message", async (message) => {
     try {
       if (message.type === "ready") {
+        diagnosticFaults.clear(`worker:${name}`);
+        diagnosticFaults.clear(`stderr:${name}`);
         const worker = workers.get(name);
         if (worker) worker.ready = true;
         if (name === "web") lastWebConfigure = "";
@@ -434,14 +478,25 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
           }
         } else if (message.type === "error") {
           webStatus = { ...webStatus, error: message.error };
-          diagnostic(message.error);
+          publish();
         }
         return;
       }
       if (name === "device") {
         if (message.type === "nativeReady") {
           observed.hardwareNativeReady = message.ready;
-          if (message.error) diagnostic(message.error);
+          if (message.ready) delete observed.hardwareNativeError;
+          else
+            observed.hardwareNativeError = redactDiagnostics(
+              message.error ?? "Native driver unavailable",
+              Object.values(credentials.all()),
+            );
+          publish();
+        } else if (message.type === "hardwareAccess") {
+          observed.hardwareAccess = redactDiagnostics(
+            message.value,
+            Object.values(credentials.all()),
+          );
           publish();
         } else if (message.type === "devices") {
           devices = message.devices;
@@ -465,7 +520,8 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
           if (deck) input(deck.id, message.id, message.key, message.down);
         } else if (message.type === "disconnect")
           triggers.disconnect(message.id);
-        else if (message.type === "diagnostic") diagnostic(message.error);
+        else if (message.type === "diagnostic")
+          diagnostic(message.error, `worker:${name}`, `${name} service`);
         return;
       }
       if (message.type === "run") {
@@ -511,49 +567,25 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         publish();
         persist();
       } else if (message.type === "capabilities") {
-        capabilities = (message.capabilities as Snapshot["capabilities"]).map(
-          (c) =>
-            c.id === "obs"
-              ? {
-                  ...c,
-                  available: document.connections.some((connection) =>
-                    Boolean(
-                      (
-                        observed[`obs:${connection.id}`] as {
-                          connected?: boolean;
-                        }
-                      )?.connected,
-                    ),
-                  ),
-                  detail: document.connections.length
-                    ? "OBS connection status is shown below."
-                    : c.detail,
-                }
-              : c,
-        );
+        capabilities = message.capabilities;
+        diagnosticFaults.clear("worker:runner");
+        diagnosticFaults.clear("stderr:runner");
         publish();
       } else if (message.type === "observed") {
-        observed[message.id] = redact(
-          message.value,
+        const value = message.value;
+        if (message.id.startsWith("obs:")) {
+          if (!document.connections.some((c) => `obs:${c.id}` === message.id))
+            return;
+          if (value?.connected) delete value.error;
+        }
+        observed[message.id] = redactDiagnostics(
+          value,
           Object.values(credentials.all()),
         );
-        if (message.id.startsWith("obs:"))
-          capabilities = capabilities.map((c) =>
-            c.id === "obs"
-              ? {
-                  ...c,
-                  available: Object.entries(observed).some(
-                    ([key, value]) =>
-                      key.startsWith("obs:") &&
-                      Boolean((value as { connected?: boolean })?.connected),
-                  ),
-                  detail: "OBS connection status is shown below.",
-                }
-              : c,
-          );
         configureDevice();
         publish();
-      } else if (message.type === "error") diagnostic(message.error);
+      } else if (message.type === "error")
+        diagnostic(message.error, `worker:${name}`, `${name} service`);
       else if (message.type === "mainAction") {
         try {
           const value = await mainAction(
@@ -571,11 +603,15 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         }
       }
     } catch (error) {
-      diagnostic(error);
+      diagnostic(error, `worker:${name}`, `${name} service`);
     }
   });
   child.stderr?.on("data", (chunk) => {
-    diagnostic(String(chunk).slice(0, 2000));
+    diagnostic(
+      String(chunk).slice(0, 2000),
+      `stderr:${name}`,
+      `${name} service output`,
+    );
   });
   child.on("exit", (code) => {
     workers.delete(name);
@@ -621,6 +657,8 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
     }
     diagnostic(
       `${name} exited (${code}); ${failures < 3 ? "restarting" : "restart the application to retry"}`,
+      `worker:${name}`,
+      `${name} service`,
     );
     if (failures < 3)
       setTimeout(() => startWorker(name, failures + 1), 500 * (failures + 1));
@@ -830,7 +868,25 @@ async function handle(raw: unknown) {
         throw new Error("Hardware deck is not configured");
       post("device", { type: "refresh", id: request.hardwareId });
       return null;
+    case "diagnosticRemedy": {
+      const record = snapshot().health?.find(
+        (record) => record.id === request.healthId,
+      );
+      const remedy = record && remedyFor(record);
+      if (!remedy)
+        throw new Error(
+          "This remedy is no longer available; recheck diagnostics",
+        );
+      if (request.action === "copy" && remedy.copy)
+        clipboard.writeText(remedy.copy);
+      else if (request.action === "open" && remedy.url)
+        await shell.openExternal(remedy.url);
+      else throw new Error("Remedy action is unavailable");
+      return null;
+    }
     case "diagnose":
+      lastWebConfigure = "";
+      configureWeb();
       post("runner", { type: "diagnose" });
       post("device", { type: "refresh" });
       return null;
@@ -986,7 +1042,8 @@ if (locked)
     runs = loaded.runs;
     credentials = new Credentials(app.getPath("userData"));
     await credentials.load();
-    if (loaded.warning) diagnostic(loaded.warning);
+    if (loaded.warning)
+      diagnostic(loaded.warning, "workspace-load", "Workspace recovery");
     protocol.handle("decker-asset", async (request) => {
       const hash = new URL(request.url).hostname;
       if (!/^[a-f0-9]{64}$/.test(hash))
