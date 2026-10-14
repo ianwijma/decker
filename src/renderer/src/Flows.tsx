@@ -44,6 +44,7 @@ import {
   selectFlowWorkflows,
 } from "./flow-selectors";
 import "./flow-canvas.css";
+import { SearchableDropdown } from "./SearchableDropdown";
 type Path = Array<{ nodeId: string; branch?: number }>;
 function WorkflowNode({ id, data, selected }: NodeProps<CanvasNode<FlowData>>) {
   const updateNodeInternals = useUpdateNodeInternals();
@@ -256,8 +257,17 @@ export const Flows = memo(function Flows() {
     [search, setSearch] = useState(""),
     [path, setPath] = useState<Path>([]),
     [runInputs, setRunInputs] = useState<Json>({});
+  const nameInput = useRef<HTMLInputElement>(null),
+    focusNameFor = useRef<string | undefined>(undefined);
   const workflow =
     doc.workflows.find((f) => f.id === flowId) ?? doc.workflows[0];
+  useLayoutEffect(() => {
+    if (workflow && focusNameFor.current === workflow.id) {
+      nameInput.current?.focus();
+      nameInput.current?.select();
+      focusNameFor.current = undefined;
+    }
+  }, [workflow?.id]);
   const graph = workflow ? at(workflow.graph, path) : undefined,
     current = graph?.nodes.find((n) => n.id === selected);
   const update = (fn: (workflow: WorkflowDefinition, graph: Graph) => void) => {
@@ -342,26 +352,24 @@ export const Flows = memo(function Flows() {
               });
               setFlowId(id);
               setPath([]);
-              setSelected(first.id);
+              setSelected("");
+              focusNameFor.current = id;
             }}
           >
             <Plus size={17} />
           </button>
         </div>
-        {doc.workflows.map((f) => (
-          <button
-            key={f.id}
-            className={`profile-item ${f.id === workflow?.id ? "active" : ""}`}
-            onClick={() => {
-              setFlowId(f.id);
-              setPath([]);
-              setSelected("");
-            }}
-          >
-            <span>⑂</span>
-            {f.name}
-          </button>
-        ))}
+        <SearchableDropdown
+          label="Workflow"
+          searchLabel="Search workflows"
+          options={doc.workflows.map((f) => ({ id: f.id, name: f.name }))}
+          value={workflow?.id}
+          onSelect={(id) => {
+            setFlowId(id);
+            setPath([]);
+            setSelected("");
+          }}
+        />
         <div className="sidebar-divider" />
         <div className="section-heading">NODE LIBRARY</div>
         <div className="search">
@@ -410,11 +418,21 @@ export const Flows = memo(function Flows() {
         {workflow ? (
           <>
             <div className="flow-toolbar">
-              <div>
+              <div className="workflow-name-editor">
                 <div className="eyebrow">
                   WORKFLOW STUDIO · REVISION {workflow.revision}
                 </div>
-                <h1>{workflow.name}</h1>
+                <input
+                  ref={nameInput}
+                  className="workflow-name-input"
+                  aria-label="Workflow name"
+                  value={workflow.name}
+                  onChange={(e) =>
+                    update((f) => {
+                      f.name = e.target.value || "Untitled";
+                    })
+                  }
+                />
               </div>
               <div className="grow" />
               {latest?.status === "running" ? (
@@ -769,17 +787,6 @@ export const Flows = memo(function Flows() {
                   Select a node to configure it. Connect handles to define the
                   order of work.
                 </p>
-                <FieldLabel label="Workflow name">
-                  <input
-                    aria-label="Workflow name"
-                    value={workflow.name}
-                    onChange={(e) =>
-                      update((f) => {
-                        f.name = e.target.value || "Untitled";
-                      })
-                    }
-                  />
-                </FieldLabel>
                 <FieldLabel label="Run timeout (ms)">
                   <input
                     type="number"
