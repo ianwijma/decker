@@ -6,7 +6,9 @@ import { selectFlowWorkflows, selectWorkflowAliases } from "./flow-selectors";
 import { useEffect, useState, type ReactNode } from "react";
 import { Plus, Search } from "lucide-react";
 import {
-  paletteCatalog,
+  catalogForPalette,
+  visibleInPalette,
+  type PaletteContext,
   actionById,
   makeAction,
   type Field,
@@ -286,6 +288,7 @@ export function TargetEditor({
       {target?.kind === "action" && (
         <>
           <ActionSelect
+            context="button"
             value={target.action.type}
             onChange={(type) =>
               onChange({ kind: "action", action: makeAction(type) })
@@ -329,6 +332,7 @@ export function TargetEditor({
                 </button>
               </div>
               <ActionSelect
+                context="button"
                 value={action.type}
                 onChange={(type) =>
                   onChange({
@@ -370,10 +374,14 @@ export function TargetEditor({
 export function ActionSelect({
   value,
   onChange,
+  context,
 }: {
   value: string;
   onChange: (type: string) => void;
+  context: PaletteContext;
 }) {
+  const palette = catalogForPalette(context);
+  const selected = actionById(value);
   return (
     <FieldLabel label="Action">
       <select
@@ -381,12 +389,13 @@ export function ActionSelect({
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
-        {actionById(value)?.paletteVisible === false && (
+        {selected && !visibleInPalette(selected, context) && (
           <option value={value}>
-            {actionById(value)!.group} / {actionById(value)!.name} (legacy)
+            {selected.group} / {selected.name} (
+            {selected.paletteVisible === false ? "legacy" : "advanced"})
           </option>
         )}
-        {paletteCatalog.map((a) => (
+        {palette.map((a) => (
           <option key={a.id} value={a.id}>
             {a.group} / {a.name}
           </option>
@@ -397,10 +406,11 @@ export function ActionSelect({
 }
 export function Catalog({ onPick }: { onPick: (type: string) => void }) {
   const [search, setSearch] = useState("");
+  const palette = catalogForPalette("button");
   return (
     <>
       <div className="section-heading">
-        ACTION LIBRARY <span>{paletteCatalog.length}</span>
+        ACTION LIBRARY <span>{palette.length}</span>
       </div>
       <div className="search">
         <Search size={16} />
@@ -414,7 +424,7 @@ export function Catalog({ onPick }: { onPick: (type: string) => void }) {
       {["Developer", "Desktop", "Media", "Streaming", "Deck"].map((group) => (
         <div key={group} className="catalog-group">
           <h3>{group}</h3>
-          {paletteCatalog
+          {palette
             .filter(
               (a) =>
                 a.group === group &&

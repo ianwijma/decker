@@ -7,6 +7,8 @@ import {
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { RunRecord, Snapshot } from "../../src/shared/schema";
+type HiddenRunFixture = { runs: RunRecord[]; restore: () => void };
 let app: ElectronApplication, directory: string;
 async function launch() {
   const executablePath = process.env.DECKER_EXECUTABLE;
@@ -73,6 +75,27 @@ test("edits a key, executes a flow with the editor hidden, and persists accent a
   await page.getByRole("button", { name: "Deck: My XL", exact: true }).click();
   await page.screenshot({ path: "test-results/deck.png", fullPage: true });
   await page.getByRole("button", { name: "Flows", exact: true }).click();
+  // Hidden Chromium renderers can throttle IPC promise delivery. Observe the
+  // real main-to-renderer snapshots from main so this assertion proves the
+  // runner finishes while the editor is hidden without relying on that editor.
+  await app.evaluate(({ BrowserWindow }) => {
+    const contents = BrowserWindow.getAllWindows()[0].webContents;
+    const send = contents.send.bind(contents);
+    const fixture: HiddenRunFixture = {
+      runs: [],
+      restore: () => {
+        contents.send = send;
+      },
+    };
+    (
+      globalThis as unknown as { hiddenRunFixture: HiddenRunFixture }
+    ).hiddenRunFixture = fixture;
+    contents.send = (channel, ...args) => {
+      if (channel === "decker:snapshot")
+        fixture.runs = (args[0] as Snapshot).runs;
+      send(channel, ...args);
+    };
+  });
   await page.getByRole("button", { name: "Run workflow", exact: true }).click();
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].close(),
@@ -85,10 +108,12 @@ test("edits a key, executes a flow with the editor hidden, and persists accent a
     )
     .toBe(false);
   await expect
-    .poll(async () =>
-      page.evaluate(
-        async (id) =>
-          (await window.decker.snapshot()).runs
+    .poll(() =>
+      app.evaluate(
+        (_, id) =>
+          (
+            globalThis as unknown as { hiddenRunFixture: HiddenRunFixture }
+          ).hiddenRunFixture.runs
             .filter((r) => r.workflowId === id)
             .at(-1)?.status,
         welcomeId,
@@ -97,6 +122,11 @@ test("edits a key, executes a flow with the editor hidden, and persists accent a
     .toBe("success");
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].show(),
+  );
+  await app.evaluate(() =>
+    (
+      globalThis as unknown as { hiddenRunFixture: HiddenRunFixture }
+    ).hiddenRunFixture.restore(),
   );
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Diagnostics", exact: true }).click();

@@ -17,7 +17,7 @@ import "@xyflow/react/dist/style.css";
 import { ArrowLeft, Play, Plus, Search, Square, Trash2 } from "lucide-react";
 import { useApp } from "./store";
 import { node, uid } from "../../shared/defaults";
-import { paletteCatalog, makeAction } from "../../shared/catalog";
+import { catalogForPalette, makeAction } from "../../shared/catalog";
 import { MediaIcon } from "./MediaIcon";
 import type {
   FlowNode,
@@ -403,7 +403,7 @@ export const Flows = memo(function Flows() {
         {["Actions", "Media"].map((group) => (
           <div key={group}>
             <h3 className="palette-heading">{group}</h3>
-            {paletteCatalog
+            {catalogForPalette("workflow")
               .filter(
                 (a) =>
                   (a.group === "Media") === (group === "Media") &&
@@ -573,6 +573,7 @@ export const Flows = memo(function Flows() {
                 {current.kind === "action" && current.action && (
                   <>
                     <ActionSelect
+                      context="workflow"
                       value={current.action.type}
                       onChange={(type) =>
                         updateNode((n) => {

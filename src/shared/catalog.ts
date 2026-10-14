@@ -9,6 +9,12 @@ import {
 import type { ActionInstance } from "./schema";
 import { desktopPathSchema, desktopUrlSchema } from "./desktop-target";
 import { mediaActions } from "./media";
+import {
+  DEFAULT_BRIGHTNESS_STEP,
+  brightnessStepSchema,
+  brightnessValueSchema,
+} from "./brightness";
+export type PaletteContext = "button" | "workflow";
 export type Field = {
   key: string;
   label: string;
@@ -44,6 +50,8 @@ export type ActionDefinition = {
   idempotent: boolean;
   /** Defaults to visible; false retains lookup/import/editing but hides new assignments. */
   paletteVisible?: boolean;
+  /** Defaults to both contexts. Global paletteVisible:false always wins. */
+  paletteContexts?: PaletteContext[];
 };
 const f = (
   key: string,
@@ -334,6 +342,7 @@ const definitions: Omit<
   },
   {
     id: "deck.brightness",
+    paletteContexts: ["workflow"],
     name: "Set brightness",
     group: "Deck",
     icon: "☀",
@@ -342,8 +351,21 @@ const definitions: Omit<
     fields: [f("value", "Brightness", 70, "number")],
     idempotent: true,
   },
+  ...[
+    { id: "deck.brightnessIncrease", name: "Increase brightness", icon: "☀+" },
+    { id: "deck.brightnessDecrease", name: "Decrease brightness", icon: "☀−" },
+  ].map((action) => ({
+    ...action,
+    group: "Deck",
+    description:
+      "Adjust the originating deck by a positive step, clamped to 0–100.",
+    capabilities: [],
+    fields: [f("step", "Step", DEFAULT_BRIGHTNESS_STEP, "number")],
+    idempotent: false,
+  })),
   {
     id: "deck.appearance",
+    paletteContexts: ["workflow"],
     name: "Change key appearance",
     group: "Deck",
     icon: "✦",
@@ -391,7 +413,7 @@ const commandOutputSchema = z.object({
   exitCode: z.number().int(),
 });
 export const catalog: ActionDefinition[] = definitions.map((d) => {
-  const schema =
+  let schema =
     d.id === "data.parseJson"
       ? parseJsonSchema
       : d.id === "data.extract"
@@ -420,26 +442,39 @@ export const catalog: ActionDefinition[] = definitions.map((d) => {
               ]),
             ),
           );
+  if (d.id === "deck.brightnessIncrease" || d.id === "deck.brightnessDecrease")
+    schema = z.object({ step: brightnessStepSchema });
   return {
     ...d,
     version: 1,
     schema,
     inputSchema: schema,
     outputSchema:
-      d.id === "http.request"
-        ? httpOutputSchema
-        : d.id === "data.parseJson" || d.id === "data.extract"
-          ? valueOutputSchema
-          : d.id === "command.run" || d.id === "command.shell"
-            ? commandOutputSchema
-            : d.id === "app.launch"
-              ? z.object({ pid: z.number().int() })
-              : z.unknown(),
+      d.id === "deck.brightnessIncrease" || d.id === "deck.brightnessDecrease"
+        ? brightnessValueSchema
+        : d.id === "http.request"
+          ? httpOutputSchema
+          : d.id === "data.parseJson" || d.id === "data.extract"
+            ? valueOutputSchema
+            : d.id === "command.run" || d.id === "command.shell"
+              ? commandOutputSchema
+              : d.id === "app.launch"
+                ? z.object({ pid: z.number().int() })
+                : z.unknown(),
   };
 });
 export const actionById = (id: string) => catalog.find((d) => d.id === id);
 // Visibility affects only new assignments, never lookup, import or execution.
-export const paletteCatalog = catalog.filter((d) => d.paletteVisible !== false);
+export const visibleInPalette = (
+  d: ActionDefinition,
+  context: PaletteContext,
+) =>
+  d.paletteVisible !== false &&
+  (!d.paletteContexts || d.paletteContexts.includes(context));
+export const catalogForPalette = (context: PaletteContext) =>
+  catalog.filter((d) => visibleInPalette(d, context));
+// Compatibility export for button libraries. Workflows must select their context.
+export const paletteCatalog = catalogForPalette("button");
 export const makeAction = (type: string): ActionInstance => ({
   type,
   version: 1,
