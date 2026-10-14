@@ -1,7 +1,9 @@
+import { bindingTargets } from "./binding-targets";
 import { uid } from "./defaults";
 import {
   documentSchema,
   v2DocumentSchema,
+  v3DocumentSchema,
   legacyDocumentSchema,
   type AppDocument,
   type DeckConfig,
@@ -51,7 +53,7 @@ export function cloneProfiles(profiles: AppDocument["profiles"]) {
       for (const key of Object.values(page.keys)) {
         key.id = ids.get(key.id)!;
         key.generation = 0;
-        for (const target of [key.press, key.release, key.longPress])
+        for (const target of bindingTargets(key).map((entry) => entry.target))
           if (target && target.kind !== "workflow")
             for (const action of target.kind === "action"
               ? [target.action]
@@ -70,7 +72,12 @@ export function cloneProfiles(profiles: AppDocument["profiles"]) {
 }
 export function migrateDocument(value: unknown): AppDocument {
   const version = (value as { schemaVersion?: number })?.schemaVersion;
-  if (version === 3) return documentSchema.parse(value);
+  if (version === 4) return documentSchema.parse(value);
+  if (version === 3)
+    return documentSchema.parse({
+      ...v3DocumentSchema.parse(value),
+      schemaVersion: 4,
+    });
   if (
     value &&
     typeof value === "object" &&
@@ -78,9 +85,10 @@ export function migrateDocument(value: unknown): AppDocument {
   )
     throw new Error("Workflow aliases require schema version 3");
   if (version === 2)
-    return documentSchema.parse(
-      migrateWorkflowIdentities(v2DocumentSchema.parse(value)),
-    );
+    return documentSchema.parse({
+      ...migrateWorkflowIdentities(v2DocumentSchema.parse(value)),
+      schemaVersion: 4,
+    });
   if (version !== 1) throw new Error(`Unsupported schema version ${version}`);
   const old = legacyDocumentSchema.parse(value),
     decks: DeckConfig[] = [],
@@ -147,8 +155,8 @@ export function migrateDocument(value: unknown): AppDocument {
     simulator: _simulator,
     ...settings
   } = old.settings;
-  return documentSchema.parse(
-    migrateWorkflowIdentities(
+  return documentSchema.parse({
+    ...migrateWorkflowIdentities(
       v2DocumentSchema.parse({
         ...old,
         schemaVersion: 2,
@@ -158,7 +166,8 @@ export function migrateDocument(value: unknown): AppDocument {
         settings: { ...settings, webEnabled: false, webPort: 9018 },
       }),
     ),
-  );
+    schemaVersion: 4,
+  });
 }
 
 // Storage uses fixed 16-column coordinates so resizing never moves/deletes existing keys.

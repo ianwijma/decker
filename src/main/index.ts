@@ -32,6 +32,12 @@ import { z } from "zod";
 import { Persistence, validateDocument, validateImport } from "./persistence";
 import { Credentials } from "./credentials";
 import { mutateCredential } from "./credential-mutations";
+import { ToggleStorage, toggleStorageRequestSchema } from "./toggle-storage";
+import {
+  toggleBindings,
+  toggleKey,
+  type ToggleState,
+} from "../shared/toggle-contract";
 import { commitBrightness } from "./brightness";
 import { brightnessActions, preserveBrightness } from "../shared/brightness";
 import { saveObsDraft, testObsRequest } from "./obs-connections";
@@ -76,7 +82,9 @@ let window: BrowserWindow | undefined,
   tray: Tray | undefined,
   quitting = false,
   store: Persistence,
-  credentials: Credentials;
+  credentials: Credentials,
+  toggleStorage: ToggleStorage;
+let toggleStates: ToggleState[] = [];
 let document: AppDocument = defaults(),
   runs: RunRecord[] = [],
   devices: Snapshot["devices"] = [],
@@ -128,8 +136,21 @@ const snapshot = (): Snapshot => {
     observed: safeObserved,
     web: webStatus,
   }).map((record) => redactDiagnostics(record, secrets) as typeof record);
+  const liveToggles = new Set(
+    toggleBindings(document).map(({ deckId, binding }) =>
+      toggleKey(deckId, binding),
+    ),
+  );
   return {
     document,
+    toggles: toggleStates.filter((state) =>
+      liveToggles.has(
+        toggleKey(state.deckId, {
+          id: state.bindingId,
+          generation: state.generation,
+        }),
+      ),
+    ),
     runs,
     devices: [
       ...safeDevices,
@@ -334,7 +355,7 @@ function configureDevice() {
   });
   configureWeb();
 }
-function configure() {
+function configure(activateToggles = false) {
   feedback.reconcile(document);
   for (const key of Object.keys(observed))
     if (
@@ -346,6 +367,7 @@ function configure() {
     type: "configure",
     document,
     credentials: credentials.all(),
+    activateToggles,
   });
   configureDevice();
   publish();
@@ -476,13 +498,14 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
   workers.set(name, { process: child, ready: false, failures });
   child.on("message", async (message) => {
     try {
+      if (workers.get(name)?.process !== child) return;
       if (message.type === "ready") {
         diagnosticFaults.clear(`worker:${name}`);
         diagnosticFaults.clear(`stderr:${name}`);
         const worker = workers.get(name);
         if (worker) worker.ready = true;
         if (name === "web") lastWebConfigure = "";
-        configure();
+        configure(name === "runner");
         return;
       }
       if (name === "web") {
@@ -549,7 +572,30 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
           diagnostic(message.error, `worker:${name}`, `${name} service`);
         return;
       }
-      if (message.type === "run") {
+      if (message.type === "toggleStorage") {
+        const request = toggleStorageRequestSchema.parse(message.request);
+        try {
+          const value = await enqueueMutation(() =>
+            toggleStorage.request(request, document),
+          );
+          if (workers.get(name)?.process === child)
+            child.postMessage({
+              type: "toggleStorageReply",
+              id: message.id,
+              value,
+            });
+        } catch {
+          if (workers.get(name)?.process === child)
+            child.postMessage({
+              type: "toggleStorageReply",
+              id: message.id,
+              error: true,
+            });
+        }
+      } else if (message.type === "toggles") {
+        toggleStates = message.states;
+        publish();
+      } else if (message.type === "run") {
         const record = message.record as RunRecord,
           index = runs.findIndex((r) => r.id === record.id);
         if (index >= 0) runs[index] = record;
@@ -633,6 +679,14 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         errorDetails: undefined,
       }));
     } else if (name === "runner") {
+      toggleStates = toggleStates.map((state) => ({
+        ...state,
+        transitioning: false,
+        reconciling: false,
+        fresh: false,
+        blocked: true,
+        error: "interrupted",
+      }));
       feedback.interrupt();
       configureDevice();
       runs = runs.map((r) =>
@@ -758,6 +812,12 @@ async function handleRequest(request: Request) {
               .flatMap((p) => p.pages)
               .flatMap((p) => Object.values(p.keys))
               .find((k) => k.id === b.id);
+            if (!old && b.toggle) {
+              // New renderer-supplied bindings cannot resurrect a deleted
+              // binding's durable state by reusing its old id/generation.
+              b.id = uid();
+              b.generation = 0;
+            }
             if (old)
               b.generation =
                 JSON.stringify({ ...old, generation: 0 }) ===
@@ -792,7 +852,7 @@ async function handleRequest(request: Request) {
     case "test": {
       const deck = document.decks.find((d) => d.id === request.deckId);
       if (!deck) throw new Error("Deck not found");
-      if (request.binding.press)
+      if (request.binding.toggle || request.binding.press)
         post("runner", {
           type: "trigger",
           binding: request.binding,
@@ -806,6 +866,11 @@ async function handleRequest(request: Request) {
         ...request,
         deckId: request.deckId ?? (document.activeDeckId || undefined),
       });
+      return null;
+    case "activateToggles":
+    case "reconcileToggle":
+    case "recoverToggle":
+      post("runner", request);
       return null;
     case "cancel":
       post("runner", { type: "cancel", id: request.runId });
@@ -1077,7 +1142,7 @@ async function handleRequest(request: Request) {
       document = next;
       credentialEpoch = uid();
       feedback.clear();
-      configure();
+      configure(true);
       return snapshot();
     }
   }
@@ -1142,6 +1207,8 @@ if (locked)
     const loaded = await store.load();
     document = loaded.document;
     runs = loaded.runs;
+    toggleStorage = new ToggleStorage(app.getPath("userData"));
+    await toggleStorage.load();
     credentials = new Credentials(app.getPath("userData"));
     await credentials.load();
     if (loaded.warning)
@@ -1200,6 +1267,7 @@ if (locked)
     powerMonitor.on("resume", () => {
       triggers.disconnect();
       post("device", { type: "refresh" });
+      post("runner", { type: "activateToggles" });
     });
   });
 app.on("second-instance", show);

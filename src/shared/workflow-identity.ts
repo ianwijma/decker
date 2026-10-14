@@ -3,6 +3,7 @@ import type {
   AppDocument,
   Graph,
   WorkflowDefinition,
+  V3Document,
 } from "./schema";
 import { actionById } from "./catalog";
 import { z } from "zod";
@@ -28,7 +29,7 @@ export function findWorkflow(
 
 export function migrateWorkflowIdentities(
   document: Omit<AppDocument, "schemaVersion" | "workflowAliases">,
-): AppDocument {
+): V3Document {
   const doc = structuredClone(document);
   const ids = [
     ...doc.workflows.map((w) => w.id),

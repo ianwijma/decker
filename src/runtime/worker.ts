@@ -1,3 +1,6 @@
+import { targetWorkflow } from "./targets";
+import { Toggles } from "./toggles";
+import type { StoredToggle } from "../main/toggle-storage";
 import { findWorkflow } from "../shared/workflow-identity";
 import { z } from "zod";
 import { Engine, type ActionContext, type RunHandle } from "./engine";
@@ -8,10 +11,8 @@ import {
   targetSchema,
   type AppDocument,
   type Json,
-  type Target,
-  type WorkflowDefinition,
 } from "../shared/schema";
-import { defaults, node, uid } from "../shared/defaults";
+import { defaults, uid } from "../shared/defaults";
 import { handlers } from "../actions/handlers";
 import { ObsConnections } from "../integrations/obs";
 import { observedAudio, observedMedia, probe } from "../adapters/linux/system";
@@ -98,48 +99,39 @@ const engine = new Engine(
   () => document.workflowAliases,
 );
 const coordinator = new Coordinator(engine);
-function targetWorkflow(target: Target): WorkflowDefinition {
-  if (target.kind === "workflow") {
-    const f = findWorkflow(
-      document.workflows,
-      target.workflowId,
-      document.workflowAliases,
-    );
-    if (!f) throw new Error("Workflow not found");
-    return f;
+const storageReplies = new Map<
+  string,
+  {
+    resolve: (value: StoredToggle | null) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
   }
-  const actions = target.kind === "sequence" ? target.actions : [target.action],
-    nodes = actions.map((a) => ({ ...node("action", a.type), action: a }));
-  return {
-    id: "direct",
-    name: target.kind === "sequence" ? "Multi-action" : actions[0].type,
-    revision: 1,
-    graph: {
-      entry: nodes[0].id,
-      nodes,
-      edges: nodes.slice(1).map((n, i) => ({
-        id: uid(),
-        source: nodes[i].id,
-        target: n.id,
-        port: "next",
-      })),
-    },
-    inputs: [],
-    outputs: [],
-    timeoutMs: 300000,
-    layout: {},
-  };
-}
+>();
+const toggles = new Toggles(
+  engine,
+  (request) =>
+    new Promise((resolve, reject) => {
+      const id = uid(),
+        timer = setTimeout(() => {
+          storageReplies.delete(id);
+          reject(new Error("Toggle storage timeout"));
+        }, 10000);
+      storageReplies.set(id, { resolve, reject, timer });
+      send({ type: "toggleStorage", id, request });
+    }),
+  (states) => send({ type: "toggles", states }),
+);
 const schema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("configure"),
     document: documentSchema,
     credentials: z.record(z.string(), z.string()),
+    activateToggles: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("trigger"),
     binding: bindingSchema,
-    target: targetSchema,
+    target: targetSchema.optional(),
     deckId: z.string(),
     phase: z.enum(["press", "release", "longPress"]).optional(),
   }),
@@ -156,6 +148,24 @@ const schema = z.discriminatedUnion("type", [
     value: z.unknown().optional(),
     error: z.string().optional(),
   }),
+  z.object({
+    type: z.literal("toggleStorageReply"),
+    id: z.string(),
+    value: z.unknown().optional(),
+    error: z.boolean().optional(),
+  }),
+  z.object({
+    type: z.literal("reconcileToggle"),
+    deckId: z.string(),
+    bindingId: z.string(),
+  }),
+  z.object({
+    type: z.literal("recoverToggle"),
+    deckId: z.string(),
+    bindingId: z.string(),
+    confirmed: z.enum(["on", "off"]),
+  }),
+  z.object({ type: z.literal("activateToggles") }),
   z.object({ type: z.literal("diagnose") }),
   z.object({ type: z.literal("stop") }),
 ]);
@@ -196,14 +206,21 @@ port.on("message", async (event) => {
           JSON.stringify(credentials) !== JSON.stringify(message.credentials);
         document = message.document;
         credentials = message.credentials;
+        toggles.configure(document, message.activateToggles);
         if (changed) await obs.close();
         void diagnose();
         break;
       }
       case "trigger": {
-        if (activeRuns.size >= 64)
+        if (engine.activeCount >= 64)
           throw new Error("Maximum active runs reached (64)");
-        const f = targetWorkflow(message.target);
+        if (message.binding.toggle) {
+          if (!message.phase || message.phase === "press")
+            void toggles.press(message.deckId, message.binding);
+          break;
+        }
+        if (!message.target) throw new Error("Target missing");
+        const f = targetWorkflow(message.target, document);
         coordinator.trigger(
           message.binding,
           f,
@@ -214,7 +231,7 @@ port.on("message", async (event) => {
         break;
       }
       case "run": {
-        if (activeRuns.size >= 64)
+        if (engine.activeCount >= 64)
           throw new Error("Maximum active runs reached (64)");
         const f = findWorkflow(
           document.workflows,
@@ -242,10 +259,40 @@ port.on("message", async (event) => {
         else reply?.resolve((message.value ?? null) as Json);
         break;
       }
+      case "toggleStorageReply": {
+        const pending = storageReplies.get(message.id);
+        if (pending) {
+          storageReplies.delete(message.id);
+          clearTimeout(pending.timer);
+          if (message.error)
+            pending.reject(new Error("Toggle storage unavailable"));
+          else pending.resolve((message.value ?? null) as StoredToggle | null);
+        }
+        break;
+      }
+      case "reconcileToggle":
+        void toggles.reconcile(message.deckId, message.bindingId);
+        break;
+      case "recoverToggle":
+        void toggles.recover(
+          message.deckId,
+          message.bindingId,
+          message.confirmed,
+        );
+        break;
+      case "activateToggles":
+        toggles.configure(document, true);
+        break;
       case "diagnose":
         void diagnose();
         break;
       case "stop":
+        toggles.stop();
+        for (const pending of storageReplies.values()) {
+          clearTimeout(pending.timer);
+          pending.reject(new Error("Worker stopped"));
+        }
+        storageReplies.clear();
         coordinator.stop();
         for (const h of standalone.values()) h.cancel();
         await obs.close();

@@ -134,7 +134,7 @@ export const appearanceSchema = z.object({
     .regex(/^#[a-fA-F0-9]{6}$/)
     .default("#f23f42"),
 });
-export const bindingSchema = z.object({
+const v3BindingSchema = z.object({
   id,
   generation: z.number().int().nonnegative(),
   appearance: appearanceSchema,
@@ -147,16 +147,56 @@ export const bindingSchema = z.object({
     .default("ignore"),
   limit: z.number().int().min(1).max(16).default(4),
 });
+export const toggleSchema = z
+  .object({
+    on: targetSchema,
+    off: targetSchema,
+    source: z.discriminatedUnion("kind", [
+      z
+        .object({ kind: z.literal("app"), initial: z.enum(["on", "off"]) })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("external"),
+          // User-authored, intended read-only. This is a contract, not enforcement.
+          probe: targetSchema,
+          timeoutMs: z.number().int().min(10).max(60000).default(10000),
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
+export type ToggleConfig = z.infer<typeof toggleSchema>;
+export const bindingSchema = v3BindingSchema
+  .extend({ toggle: toggleSchema.optional() })
+  .superRefine((binding, ctx) => {
+    if (
+      binding.toggle &&
+      (binding.press || binding.longPress || binding.release)
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["toggle"],
+        message:
+          "Toggle mode owns input; remove ordinary press, release and longPress assignments explicitly",
+      });
+  });
 export type KeyBinding = z.infer<typeof bindingSchema>;
-export const pageSchema = z.object({
+const v3PageSchema = z.object({
   id,
   name: z.string().min(1).max(100),
   parentId: id.optional(),
-  keys: z.record(z.string().regex(/^\d{1,3}$/), bindingSchema),
+  keys: z.record(z.string().regex(/^\d{1,3}$/), v3BindingSchema.strict()),
 });
-export const profileSchema = z.object({
+const v3ProfileSchema = z.object({
   id,
   name: z.string().min(1).max(100),
+  pages: z.array(v3PageSchema).min(1).max(100),
+});
+export const pageSchema = v3PageSchema.extend({
+  keys: z.record(z.string().regex(/^\d{1,3}$/), bindingSchema),
+});
+export const profileSchema = v3ProfileSchema.extend({
   pages: z.array(pageSchema).min(1).max(100),
 });
 export const connectionSchema = z.object({
@@ -167,7 +207,7 @@ export const connectionSchema = z.object({
 });
 export const legacyDocumentSchema = z.object({
   schemaVersion: z.literal(1),
-  profiles: z.array(profileSchema).min(1).max(100),
+  profiles: z.array(v3ProfileSchema).min(1).max(100),
   workflows: z.array(workflowSchema).max(200),
   connections: z.array(connectionSchema).max(30),
   devices: z
@@ -209,7 +249,7 @@ export const v2DocumentSchema = legacyDocumentSchema
     schemaVersion: z.literal(2),
     decks: z.array(deckSchema).max(64),
     activeDeckId: z.string(),
-    profiles: z.array(profileSchema).max(200),
+    profiles: z.array(v3ProfileSchema).max(200),
     settings: legacyDocumentSchema.shape.settings
       .omit({ brightness: true, simulator: true })
       .extend({
@@ -237,40 +277,51 @@ const workflowAliasesSchema = z.preprocess(
     .max(10000)
     .transform((entries) => Object.fromEntries(entries)),
 );
-export const documentSchema = v2DocumentSchema
-  .extend({
-    schemaVersion: z.literal(3),
-    workflows: z.array(workflowSchema.extend({ id: z.uuid() })).max(200),
-    workflowAliases: workflowAliasesSchema.default({}),
-  })
-  .superRefine((doc, ctx) => {
-    const workflowIds = new Set(doc.workflows.map((workflow) => workflow.id));
-    const documentIds = new Set([
-      ...doc.workflows.map((workflow) => workflow.id),
-      ...doc.connections.map((c) => c.id),
-      ...doc.decks.map((d) => d.id),
-      ...doc.profiles.flatMap((p) => [
-        p.id,
-        ...p.pages.flatMap((page) => [
-          page.id,
-          ...Object.values(page.keys).map((b) => b.id),
-        ]),
+const documentObjectSchema = v2DocumentSchema.extend({
+  schemaVersion: z.literal(3),
+  workflows: z.array(workflowSchema.extend({ id: z.uuid() })).max(200),
+  workflowAliases: workflowAliasesSchema.default({}),
+});
+const validateAliases = (
+  doc: Omit<z.infer<typeof documentObjectSchema>, "schemaVersion">,
+  ctx: z.RefinementCtx,
+) => {
+  const workflowIds = new Set(doc.workflows.map((workflow) => workflow.id));
+  const documentIds = new Set([
+    ...doc.workflows.map((workflow) => workflow.id),
+    ...doc.connections.map((c) => c.id),
+    ...doc.decks.map((d) => d.id),
+    ...doc.profiles.flatMap((p) => [
+      p.id,
+      ...p.pages.flatMap((page) => [
+        page.id,
+        ...Object.values(page.keys).map((b) => b.id),
       ]),
-    ]);
-    for (const [alias, target] of Object.entries(doc.workflowAliases)) {
-      // Targets may be tombstones after deletion. Never reuse their aliases.
-      if (
-        documentIds.has(alias) ||
-        Object.hasOwn(doc.workflowAliases, target) ||
-        (documentIds.has(target) && !workflowIds.has(target))
-      )
-        ctx.addIssue({
-          code: "custom",
-          path: ["workflowAliases", alias],
-          message: "Workflow alias collides with an identity or another alias",
-        });
-    }
-  });
+    ]),
+  ]);
+  for (const [alias, target] of Object.entries(doc.workflowAliases)) {
+    // Targets may be tombstones after deletion. Never reuse their aliases.
+    if (
+      documentIds.has(alias) ||
+      Object.hasOwn(doc.workflowAliases, target) ||
+      (documentIds.has(target) && !workflowIds.has(target))
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["workflowAliases", alias],
+        message: "Workflow alias collides with an identity or another alias",
+      });
+  }
+};
+export const v3DocumentSchema =
+  documentObjectSchema.superRefine(validateAliases);
+export type V3Document = z.infer<typeof v3DocumentSchema>;
+export const documentSchema = documentObjectSchema
+  .extend({
+    schemaVersion: z.literal(4),
+    profiles: z.array(profileSchema).max(200),
+  })
+  .superRefine(validateAliases);
 export type AppDocument = z.infer<typeof documentSchema>;
 export type RunStatus =
   "running" | "success" | "failure" | "cancelled" | "interrupted";
@@ -346,6 +397,7 @@ export type CredentialStatus =
   "configured" | "missing" | "locked" | "session-only";
 export type Snapshot = {
   document: AppDocument;
+  toggles?: import("./toggle-contract").ToggleState[];
   runs: RunRecord[];
   devices: DeviceStatus[];
   capabilities: Capability[];
@@ -384,6 +436,14 @@ export const requestSchema = z.discriminatedUnion("type", [
     deckId: id.optional(),
   }),
   z.object({ type: z.literal("cancel"), runId: id }),
+  z.object({ type: z.literal("activateToggles") }),
+  z.object({ type: z.literal("reconcileToggle"), deckId: id, bindingId: id }),
+  z.object({
+    type: z.literal("recoverToggle"),
+    deckId: id,
+    bindingId: id,
+    confirmed: z.enum(["on", "off"]),
+  }),
   z.object({
     type: z.literal("navigate"),
     deckId: id,

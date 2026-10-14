@@ -1,3 +1,5 @@
+import { targetWorkflow } from "../runtime/targets";
+import { bindingTargets } from "../shared/binding-targets";
 import { rekeyCredentials } from "../shared/credential-owners";
 import { randomUUID } from "node:crypto";
 import { findWorkflow } from "../shared/workflow-identity";
@@ -88,6 +90,12 @@ export function validateDocument(value: unknown): AppDocument {
       : doc.activeDeckId !== ""
   )
     throw new Error("Active deck is missing");
+  if (
+    doc.profiles
+      .flatMap((p) => p.pages.flatMap((page) => Object.values(page.keys)))
+      .filter((b) => b.toggle).length > 4096
+  )
+    throw new Error("Maximum toggle bindings reached (4096)");
   return doc;
 }
 export function validateImport(value: unknown): AppDocument {
@@ -95,11 +103,7 @@ export function validateImport(value: unknown): AppDocument {
   for (const profile of doc.profiles)
     for (const page of profile.pages)
       for (const binding of Object.values(page.keys))
-        for (const target of [
-          binding.press,
-          binding.release,
-          binding.longPress,
-        ]) {
+        for (const { phase, target } of bindingTargets(binding)) {
           if (!target) continue;
           if (target.kind === "workflow") {
             if (
@@ -112,6 +116,15 @@ export function validateImport(value: unknown): AppDocument {
               throw new Error(
                 `Missing assigned workflow: ${target.workflowId}`,
               );
+            continue;
+          }
+          if (phase.startsWith("toggle.")) {
+            const errors = validateWorkflow(
+              targetWorkflow(target, doc),
+              doc.workflows,
+              doc.workflowAliases,
+            );
+            if (errors.length) throw new Error(errors.join("\n"));
             continue;
           }
           for (const action of target.kind === "action"
@@ -151,6 +164,14 @@ export function validateImport(value: unknown): AppDocument {
     const errors = validateWorkflow(f, doc.workflows, doc.workflowAliases);
     if (errors.length) throw new Error(errors.join("\n"));
   }
+  // Runtime state is local and cannot be rebound by re-importing a bundle.
+  for (const profile of doc.profiles)
+    for (const page of profile.pages)
+      for (const binding of Object.values(page.keys))
+        if (binding.toggle) {
+          binding.id = randomUUID();
+          binding.generation = 0;
+        }
   return doc;
 }
 export class Persistence {
@@ -174,18 +195,18 @@ export class Persistence {
       const raw = await readFile(join(this.directory, "config.json"), "utf8");
       configRead = true;
       const value = JSON.parse(raw);
-      if (value.schemaVersion !== 3) {
+      if (value.schemaVersion !== 4) {
         await copyFile(
           join(this.directory, "config.json"),
           join(this.directory, `migration-backup-${Date.now()}.json`),
         );
-        if (![1, 2].includes(value.schemaVersion))
+        if (![1, 2, 3].includes(value.schemaVersion))
           throw new Error(
             `Unsupported schema version ${value.schemaVersion}; backup saved`,
           );
       }
       document = validateDocument(migrateDocument(value));
-      if (value.schemaVersion !== 3)
+      if (value.schemaVersion !== 4)
         await this.atomic("config.json", JSON.stringify(document, null, 2));
     } catch (error) {
       if (configRead || (error as NodeJS.ErrnoException).code !== "ENOENT") {

@@ -3,6 +3,7 @@ import {
   resolveWorkflowId,
   type WorkflowAliases,
 } from "../shared/workflow-identity";
+import { boundedResult, type ExecutionResult } from "./results";
 import { actionById } from "../shared/catalog";
 import { createActor, fromPromise } from "xstate";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -36,6 +37,7 @@ export type RunHandle = {
   record: RunRecord;
   cancel: () => void;
   done: Promise<RunRecord>;
+  result: Promise<ExecutionResult>;
   containsWorkflow: (id: string) => boolean;
 };
 export class Engine {
@@ -43,6 +45,9 @@ export class Engine {
     string,
     { invocations: Invocations; cancel: () => void }
   >();
+  get activeCount() {
+    return this.active.size;
+  }
   cancelWorkflow(id: string) {
     for (const root of this.active.values())
       if (root.invocations.has(id)) root.cancel();
@@ -79,7 +84,10 @@ export class Engine {
     inputs: Record<string, Json> = {},
     binding?: { bindingId?: string; generation?: number; deckId?: string },
     aliasesSnapshot = this.workflowAliases(),
+    options: { privateResult?: boolean } = {},
   ): RunHandle {
+    if (this.active.size >= 64)
+      throw new Error("Maximum active runs reached (64)");
     const workflow = structuredClone(definition),
       all = structuredClone(definitions),
       aliases = structuredClone(aliasesSnapshot),
@@ -108,9 +116,10 @@ export class Engine {
     const publish = () => {
       while (record.nodes.length > 1 && JSON.stringify(record).length > 256000)
         record.nodes.shift();
-      this.emit(structuredClone(record));
+      if (!options.privateResult) this.emit(structuredClone(record));
     };
-    let steps = 0;
+    let steps = 0,
+      timedOut = false;
     const safe = (v: unknown) => redact(v, this.secrets());
     const runGraph = async (
       g: Graph,
@@ -151,7 +160,10 @@ export class Engine {
           try {
             nodeSignal.throwIfAborted();
             const c = resolve(n.config, scope) as Record<string, Json>;
-            trace.input = safe(n.action ? resolve(n.action.config, scope) : c);
+            if (!options.privateResult)
+              trace.input = safe(
+                n.action ? resolve(n.action.config, scope) : c,
+              );
             const child = async (
               id: string,
               childInputs: Record<string, Json>,
@@ -389,12 +401,17 @@ export class Engine {
               }
             }
             nodeSignal.throwIfAborted();
-            trace.output = safe(output);
+            if (!options.privateResult) trace.output = safe(output);
             trace.status = "success";
             trace.endedAt = Date.now();
             publish();
             break;
           } catch (error) {
+            if (
+              nodeSignal.aborted &&
+              nodeSignal.reason?.name === "TimeoutError"
+            )
+              timedOut = true;
             trace.status = parentSignal.aborted ? "cancelled" : "failure";
             trace.error = String(
               safe(error instanceof Error ? error.message : String(error)),
@@ -431,6 +448,11 @@ export class Engine {
       return last;
     };
     publish();
+    let resolveResult!: (value: ExecutionResult) => void;
+    const result = new Promise<ExecutionResult>((resolve) => {
+      resolveResult = resolve;
+    });
+    let output: unknown;
     const done = new Promise<RunRecord>((resolveDone) => {
       // Async work is an invoked promise actor; underlying operations share our abort signal.
       const actor = createActor(
@@ -453,6 +475,13 @@ export class Engine {
         }),
       );
       const finish = (error?: unknown) => {
+        resolveResult(
+          controller.signal.aborted
+            ? { status: "cancelled" }
+            : error
+              ? { status: deadline.aborted || timedOut ? "timeout" : "failure" }
+              : { status: "success", output: boundedResult(output) },
+        );
         leaveRoot();
         this.active.delete(record.id);
         record.endedAt = Date.now();
@@ -475,7 +504,13 @@ export class Engine {
         resolveDone(record);
         actor.stop();
       };
-      actor.subscribe({ complete: () => finish(), error: finish });
+      actor.subscribe({
+        next: (snapshot) => {
+          if (snapshot.status === "done") output = snapshot.output;
+        },
+        complete: () => finish(),
+        error: finish,
+      });
       actor.start();
     });
     return {
@@ -483,6 +518,7 @@ export class Engine {
       cancel,
       containsWorkflow: (id) => invocations.has(id),
       done,
+      result,
     };
   }
 }

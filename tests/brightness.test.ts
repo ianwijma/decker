@@ -215,7 +215,7 @@ describe("palette compatibility", () => {
       const loaded = (await store.load()).document;
       const exported = await store.export(loaded);
       expect(validateImport(exported.document).profiles).toEqual(doc.profiles);
-      expect(loaded.schemaVersion).toBe(3);
+      expect(loaded.schemaVersion).toBe(4);
       expect(loaded.workflowAliases).toEqual(doc.workflowAliases);
     } finally {
       await rm(directory, { recursive: true, force: true });
