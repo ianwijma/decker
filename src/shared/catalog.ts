@@ -1,9 +1,13 @@
 import { z } from "zod";
 import type { ActionInstance } from "./schema";
+import { desktopPathSchema, desktopUrlSchema } from "./desktop-target";
 export type Field = {
   key: string;
   label: string;
-  type?: "text" | "number" | "boolean" | "select" | "secret" | "workflow";
+  type?:
+    "text" | "number" | "boolean" | "select" | "secret" | "workflow" | "file";
+  /** For a file field, offer the desktop-only native selector beside manual entry. */
+  picker?: "openFile";
   options?: string[];
   default?: string | number | boolean;
   hint?: string;
@@ -22,6 +26,8 @@ export type ActionDefinition = {
   outputSchema: z.ZodType;
   resource?: string;
   idempotent: boolean;
+  /** Defaults to visible; false retains lookup/import/editing but hides new assignments. */
+  paletteVisible?: boolean;
 };
 const f = (
   key: string,
@@ -49,12 +55,39 @@ const definitions: Omit<
   },
   {
     id: "desktop.open",
+    paletteVisible: false,
     name: "Open URL or file",
     group: "Developer",
     icon: "↗",
     description: "Open a URL, file or directory with the desktop default.",
     capabilities: [],
     fields: [f("target", "URL or path", "https://example.com")],
+    idempotent: false,
+  },
+  {
+    id: "desktop.openUrl",
+    name: "Open URL",
+    group: "Developer",
+    icon: "↗",
+    description: "Open an HTTP or HTTPS URL without embedded credentials.",
+    capabilities: [],
+    fields: [f("url", "URL", "https://example.com")],
+    idempotent: false,
+  },
+  {
+    id: "desktop.openFile",
+    name: "Open file",
+    group: "Developer",
+    icon: "↗",
+    description: "Open a local file with the desktop default application.",
+    capabilities: [],
+    fields: [
+      {
+        ...f("path", "File path", "./file.txt", "file"),
+        picker: "openFile",
+        hint: "Choose a file or enter a path. Relative paths resolve from the application working directory; spaces and Unicode are preserved.",
+      },
+    ],
     idempotent: false,
   },
   {
@@ -299,33 +332,41 @@ export const catalog: ActionDefinition[] = definitions.map((d) => ({
     Object.fromEntries(
       d.fields.map((field) => [
         field.key,
-        field.type === "number"
-          ? z.number()
-          : field.type === "boolean"
-            ? z.boolean()
-            : field.options
-              ? z.enum(field.options as [string, ...string[]])
-              : field.key === "args"
-                ? z.string().refine((value) => {
-                    try {
-                      const args = JSON.parse(value);
-                      return (
-                        Array.isArray(args) &&
-                        args.length <= 256 &&
-                        args.every((a) => typeof a === "string")
-                      );
-                    } catch {
-                      return false;
-                    }
-                  }, "Use a JSON array of at most 256 string arguments")
-                : ["executable", "url", "target", "keys"].includes(field.key)
-                  ? z.string().min(1)
-                  : z.string(),
+        d.id === "desktop.openUrl" && field.key === "url"
+          ? desktopUrlSchema
+          : d.id === "desktop.openFile" && field.key === "path"
+            ? desktopPathSchema
+            : field.type === "number"
+              ? z.number()
+              : field.type === "boolean"
+                ? z.boolean()
+                : field.options
+                  ? z.enum(field.options as [string, ...string[]])
+                  : field.key === "args"
+                    ? z.string().refine((value) => {
+                        try {
+                          const args = JSON.parse(value);
+                          return (
+                            Array.isArray(args) &&
+                            args.length <= 256 &&
+                            args.every((a) => typeof a === "string")
+                          );
+                        } catch {
+                          return false;
+                        }
+                      }, "Use a JSON array of at most 256 string arguments")
+                    : ["executable", "url", "target", "keys"].includes(
+                          field.key,
+                        )
+                      ? z.string().min(1)
+                      : z.string(),
       ]),
     ),
   ),
 }));
 export const actionById = (id: string) => catalog.find((d) => d.id === id);
+// Visibility affects only new assignments, never lookup, import or execution.
+export const paletteCatalog = catalog.filter((d) => d.paletteVisible !== false);
 export const makeAction = (type: string): ActionInstance => ({
   type,
   version: 1,

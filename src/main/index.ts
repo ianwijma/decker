@@ -16,7 +16,9 @@ import {
 } from "electron";
 import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import { openDesktopTarget } from "./desktop-open";
+import { pickDesktopFile } from "./desktop-file-picker";
 import sharp from "sharp";
 import { createHash } from "node:crypto";
 import {
@@ -356,21 +358,12 @@ async function mainAction(
   if (action.startsWith("deck.") && !deck)
     throw new Error("No originating deck selected");
   switch (action) {
-    case "desktop.open": {
-      const target = String(c.target);
-      if (/^https?:\/\//.test(target)) {
-        const url = new URL(target);
-        if (url.username || url.password)
-          throw new Error("URL credentials are not supported");
-        await shell.openExternal(url.href);
-      } else {
-        if (/^[a-z][a-z0-9+.-]*:/i.test(target))
-          throw new Error("Only HTTP(S) URLs and local paths are supported");
-        const error = await shell.openPath(resolve(target));
-        if (error) throw new Error(error);
-      }
-      return null;
-    }
+    case "desktop.open":
+      return openDesktopTarget(action, c.target, shell);
+    case "desktop.openUrl":
+      return openDesktopTarget(action, c.url, shell);
+    case "desktop.openFile":
+      return openDesktopTarget(action, c.path, shell);
     case "desktop.copy":
       clipboard.writeText(String(c.text));
       return null;
@@ -864,6 +857,10 @@ async function handle(raw: unknown) {
       await credentials.set(request.ref, request.value, request.persist);
       configure();
       return null;
+    case "pickFile":
+      return pickDesktopFile((options) =>
+        dialog.showOpenDialog(window!, options),
+      );
     case "asset": {
       const result = await dialog.showOpenDialog({
         properties: ["openFile"],

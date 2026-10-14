@@ -17,7 +17,7 @@ import "@xyflow/react/dist/style.css";
 import { ArrowLeft, Play, Plus, Search, Square, Trash2 } from "lucide-react";
 import { useApp } from "./store";
 import { node, uid } from "../../shared/defaults";
-import { catalog, makeAction } from "../../shared/catalog";
+import { paletteCatalog, makeAction } from "../../shared/catalog";
 import type {
   FlowNode,
   Graph,
@@ -400,7 +400,7 @@ export const Flows = memo(function Flows() {
             </button>
           ))}
         <h3 className="palette-heading">Actions</h3>
-        {catalog
+        {paletteCatalog
           .filter((a) => a.name.toLowerCase().includes(search.toLowerCase()))
           .map((a) => (
             <button
