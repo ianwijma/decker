@@ -6,7 +6,6 @@ import {
   Plus,
   Trash2,
   ChevronRight,
-  Layers,
   Settings2,
   Globe,
   ClipboardPaste,
@@ -20,6 +19,7 @@ import { deviceStatusLabel } from "../../shared/device-status";
 import { actionById } from "../../shared/catalog";
 import type { KeyBinding } from "../../shared/schema";
 import { Catalog, FieldLabel, TargetEditor } from "./components";
+import { SearchableDropdown } from "./SearchableDropdown";
 export function Deck() {
   const { snapshot, edit, request } = useApp(),
     doc = snapshot!.document,
@@ -99,10 +99,10 @@ export function Deck() {
           <button
             className="icon-button"
             aria-label="Add profile"
-            onClick={() =>
+            onClick={() => {
+              const id = uid(),
+                pageId = uid();
               edit((d) => {
-                const id = uid(),
-                  pageId = uid();
                 d.profiles.push({
                   id,
                   name: `Profile ${d.profiles.length + 1}`,
@@ -112,34 +112,39 @@ export function Deck() {
                   (deck) => deck.id === doc.activeDeckId,
                 )!;
                 deck.profileIds.push(id);
-                deck.activeProfileId = id;
-                deck.activePageId = pageId;
-              })
-            }
+              });
+              void request({
+                type: "navigate",
+                deckId: deck.id,
+                profileId: id,
+                pageId,
+              });
+            }}
           >
             <Plus size={16} />
           </button>
         </div>
-        {doc.profiles
-          .filter((p) => deck.profileIds.includes(p.id))
-          .map((p) => (
-            <button
-              className={`profile-item ${profile.id === p.id ? "active" : ""}`}
-              key={p.id}
-              onClick={() =>
-                void request({
-                  type: "navigate",
-                  deckId: deck.id,
-                  profileId: p.id,
-                  pageId: p.pages[0].id,
-                })
-              }
-            >
-              <Layers size={17} />
-              {p.name}
-              <span>{p.pages.length}</span>
-            </button>
-          ))}
+        <SearchableDropdown
+          label="Profile"
+          searchLabel="Search profiles"
+          options={doc.profiles
+            .filter((p) => deck.profileIds.includes(p.id))
+            .map((p) => ({
+              id: p.id,
+              name: p.name,
+              description: `${p.pages.length} pages`,
+            }))}
+          value={profile.id}
+          onSelect={(id) => {
+            const next = doc.profiles.find((p) => p.id === id)!;
+            void request({
+              type: "navigate",
+              deckId: deck.id,
+              profileId: next.id,
+              pageId: next.pages[0].id,
+            });
+          }}
+        />
         <div className="sidebar-divider" />
         <Catalog onPick={assign} />
         <div className="sidebar-tip">

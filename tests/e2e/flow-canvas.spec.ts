@@ -400,7 +400,10 @@ test("workflow switches and nested scopes reset canvas state and keep saved posi
   await openFlow();
   await drag(page, shared.id, 45, 30, a.id);
   const savedA = await layout(page, a.id);
-  await page.getByRole("button", { name: /Scope B$/ }).click();
+  await page
+    .getByRole("button", { name: "Workflow: Scope A", exact: true })
+    .click();
+  await page.getByRole("option", { name: "Scope B", exact: true }).click();
   await expect(page.locator(".react-flow__node")).toHaveCount(1);
   await expect(page.locator(".react-flow__node")).toHaveAttribute(
     "style",
@@ -408,7 +411,10 @@ test("workflow switches and nested scopes reset canvas state and keep saved posi
   );
   await drag(page, shared.id, 20, 30, b.id);
   const savedB = await layout(page, b.id);
-  await page.getByRole("button", { name: /Scope A$/ }).click();
+  await page
+    .getByRole("button", { name: "Workflow: Scope B", exact: true })
+    .click();
+  await page.getByRole("option", { name: "Scope A", exact: true }).click();
   expect(await layout(page, a.id)).toEqual(savedA);
   for (const [parent, button, child] of [
     [repeat.id, "Edit loop body →", inner.id],
@@ -517,7 +523,17 @@ test("all node kinds retain their ports and dynamic switch cases connect after J
     .getByRole("button", { name: "Create workflow", exact: true })
     .click();
   await expect(page.locator(".react-flow__node")).toHaveCount(1);
-  await expect(page.locator(".react-flow__node.selected")).toHaveCount(1);
+  await expect(page.locator(".react-flow__node.selected")).toHaveCount(0);
+  const name = page.getByRole("textbox", {
+    name: "Workflow name",
+    exact: true,
+  });
+  await expect(name).toBeFocused();
+  expect(
+    await name.evaluate(
+      (input: HTMLInputElement) => input.selectionEnd! - input.selectionStart!,
+    ),
+  ).toBe((await name.inputValue()).length);
   await expect(page.locator(".react-flow__minimap-node")).toHaveCount(1);
 });
 

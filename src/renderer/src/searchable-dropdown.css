@@ -1,0 +1,69 @@
+.searchable-dropdown {
+  position: relative;
+  width: 100%;
+}
+.searchable-dropdown .searchable-dropdown-trigger {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+}
+.searchable-dropdown-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.searchable-dropdown-trigger > svg {
+  flex-shrink: 0;
+}
+.searchable-dropdown-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #232428;
+  box-shadow: 0 8px 24px #0006;
+}
+.searchable-dropdown-popup > input {
+  width: 100%;
+  margin-bottom: 6px;
+}
+.searchable-dropdown-options {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.searchable-dropdown-option {
+  padding: 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.searchable-dropdown-option.highlighted {
+  background: #404249;
+}
+.searchable-dropdown-option[aria-selected="true"] {
+  box-shadow: inset 3px 0 var(--accent);
+}
+.searchable-dropdown-option > small {
+  display: block;
+  color: #b5bac1;
+  margin-top: 3px;
+}
+.searchable-dropdown-empty {
+  padding: 12px 8px;
+  color: #b5bac1;
+}
+.flow-toolbar .workflow-name-editor {
+  min-width: 0;
+  flex: 1;
+}
+.flow-toolbar .workflow-name-input {
+  width: 100%;
+  font-size: 21px;
+  font-weight: 600;
+}
