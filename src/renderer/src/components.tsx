@@ -16,6 +16,7 @@ import type {
   Target,
   WorkflowDefinition,
 } from "../../shared/schema";
+import { ActionSecret } from "./InlineSecret";
 import { actionLocation, FilePickerButton } from "./file-picker";
 import { MediaIcon } from "./MediaIcon";
 export function FieldLabel({
@@ -115,6 +116,8 @@ export function ActionFields({
     <div className="fields">
       <p className="muted small">{definition.description}</p>
       {definition.fields.map((field) => {
+        if (field.type === "secret")
+          return <ActionSecret key={field.key} action={action} scope={scope} />;
         const value = Object.hasOwn(action.config, field.key)
           ? action.config[field.key]
           : (field.default ?? "");

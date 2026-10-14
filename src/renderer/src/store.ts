@@ -15,7 +15,8 @@ type State = {
 };
 let pending = Promise.resolve(),
   version = 0,
-  saves = 0;
+  saves = 0,
+  credentialPending = false;
 export const useApp = create<State>((set, get) => ({
   saving: false,
   tab: "home",
@@ -31,6 +32,12 @@ export const useApp = create<State>((set, get) => ({
           : snapshot,
     })),
   edit: (fn) => {
+    if (credentialPending) {
+      set({
+        error: "Wait for the secret to finish saving, then retry your edit.",
+      });
+      return;
+    }
     const snapshot = get().snapshot;
     if (!snapshot) return;
     const document = structuredClone(snapshot.document);
@@ -69,12 +76,19 @@ export const useApp = create<State>((set, get) => ({
       });
   },
   request: async (request) => {
+    const credential = request.type === "credential";
+    if (credential && credentialPending) return undefined;
+    if (credential) credentialPending = true;
     try {
       await pending;
-      return await window.decker.request(request);
+      const result = await window.decker.request(request);
+      if (credential && result) set({ snapshot: result as Snapshot });
+      return result;
     } catch (error) {
       set({ error: String(error) });
       return undefined;
+    } finally {
+      if (credential) credentialPending = false;
     }
   },
 }));

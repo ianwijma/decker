@@ -1,3 +1,5 @@
+import { rekeyCredentials } from "../shared/credential-owners";
+import { randomUUID } from "node:crypto";
 import { findWorkflow } from "../shared/workflow-identity";
 import {
   mkdir,
@@ -233,8 +235,10 @@ export class Persistence {
     const operation = this.pending
       .catch(() => {})
       .then(async () => {
-        await this.atomic("config.json", config);
+        // Commit the owner document last: a history failure must not commit a
+        // credential reference while reporting that its transaction failed.
         await this.atomic("history.json", history);
+        await this.atomic("config.json", config);
       });
     this.pending = operation;
     return operation;
@@ -268,12 +272,7 @@ export class Persistence {
       );
     return {
       format: "decker",
-      document: {
-        ...document,
-        connections: document.connections.map(
-          ({ credentialRef: _ref, ...c }) => c,
-        ),
-      },
+      document: rekeyCredentials(document, () => `import:${randomUUID()}`),
       assets,
     };
   }

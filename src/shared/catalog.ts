@@ -151,7 +151,7 @@ const definitions: Omit<
         "DELETE",
       ]),
       f("body", "Body", ""),
-      f("credentialRef", "Bearer credential reference", ""),
+      f("credentialRef", "Bearer token", "", "secret"),
     ],
     idempotent: false,
   },
