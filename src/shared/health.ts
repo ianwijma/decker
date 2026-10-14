@@ -250,7 +250,7 @@ function deviceHealth(device: DeviceStatus, evidence?: Json): HealthRecord {
         rules?: { path: string }[];
       }
     | undefined;
-  const detail = device.errorDetails?.message;
+  const detail = device.errorDetails?.message ?? device.error;
   const permission =
     device.state === "permission-denied"
       ? "The deck was discovered, but this process cannot open its HID interface."

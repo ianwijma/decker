@@ -625,6 +625,7 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         state: "io-error",
         updatedAt: Date.now(),
         error: "Device service exited; readiness is unknown",
+        errorDetails: undefined,
       }));
     } else if (name === "runner") {
       runs = runs.map((r) =>
