@@ -358,6 +358,7 @@ export const requestSchema = z.discriminatedUnion("type", [
     type: z.literal("save"),
     document: documentSchema,
     navigationEdits: z.array(id).optional(),
+    brightnessEdits: z.array(id).optional(),
   }),
   z.object({
     type: z.literal("press"),

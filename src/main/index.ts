@@ -32,6 +32,8 @@ import { z } from "zod";
 import { Persistence, validateDocument, validateImport } from "./persistence";
 import { Credentials } from "./credentials";
 import { mutateCredential } from "./credential-mutations";
+import { commitBrightness } from "./brightness";
+import { brightnessActions, preserveBrightness } from "../shared/brightness";
 import {
   credentialOwners,
   rekeyCredentials,
@@ -361,9 +363,12 @@ function navigate(deckId: string, profileId: string, pageId: string) {
 async function mainAction(
   ...args: Parameters<typeof performMainAction>
 ): Promise<Json> {
-  return ["deck.page", "deck.profile", "deck.back", "deck.brightness"].includes(
-    args[0],
-  )
+  return [
+    "deck.page",
+    "deck.profile",
+    "deck.back",
+    ...brightnessActions,
+  ].includes(args[0])
     ? enqueueMutation(async () => {
         // A run can cancel while a credential/document commit holds this queue.
         // Never apply its delayed navigation or brightness after it has settled.
@@ -420,13 +425,20 @@ async function performMainAction(
       if (page(deck!.id).parentId)
         navigate(deck!.id, deck!.activeProfileId, page(deck!.id).parentId!);
       return null;
-    case "deck.brightness": {
-      const value = z.number().int().min(0).max(100).parse(c.value);
-      deck!.brightness = value;
+    case "deck.brightness":
+    case "deck.brightnessIncrease":
+    case "deck.brightnessDecrease": {
+      const committed = await commitBrightness(
+        document,
+        action,
+        c,
+        context.deckId,
+        (next) => store.save(next, runs),
+      );
+      document = committed.document;
       configureDevice();
       publish();
-      persist();
-      return value;
+      return committed.value;
     }
     case "deck.appearance": {
       const binding = Object.values(page(deck!.id).keys).find(
@@ -703,6 +715,7 @@ async function handleRequest(request: Request) {
     case "save": {
       const next = request.document;
       preserveNavigation(document, next, request.navigationEdits);
+      preserveBrightness(document, next, request.brightnessEdits);
       validateDocument(next);
       for (const f of next.workflows) {
         const old = document.workflows.find((w) => w.id === f.id);

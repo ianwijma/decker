@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { AppDocument, Request, Snapshot } from "../../shared/schema";
+import { brightnessEdits } from "../../shared/brightness";
 type State = {
   snapshot?: Snapshot;
   error?: string;
@@ -42,6 +43,7 @@ export const useApp = create<State>((set, get) => ({
     if (!snapshot) return;
     const document = structuredClone(snapshot.document);
     fn(document);
+    const editedBrightness = brightnessEdits(snapshot.document, document);
     const navigationEdits = document.decks
       .filter((deck) => {
         const previous = snapshot.document.decks.find((d) => d.id === deck.id);
@@ -63,6 +65,7 @@ export const useApp = create<State>((set, get) => ({
             type: "save",
             document,
             navigationEdits,
+            brightnessEdits: editedBrightness,
           })) as Snapshot;
           if (version === editVersion) set({ snapshot: saved });
         } catch (error) {
