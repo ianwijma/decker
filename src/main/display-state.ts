@@ -7,7 +7,7 @@ import sharp from "sharp";
 import { activityKey } from "../shared/feedback";
 import {
   displayPatchSchema,
-  displayUpdateSchema,
+  displayActionSchema,
   displayFields,
   type DisplayPatch,
 } from "../shared/display-contract";
@@ -232,7 +232,23 @@ export class DisplayState {
     raw: unknown,
     context: { authority?: string; runId?: string; actionId?: string },
   ) {
-    const patch = displayUpdateSchema.parse(raw),
+    const safeRaw =
+      raw && typeof raw === "object" && !Array.isArray(raw)
+        ? ({ ...raw } as Record<string, unknown>)
+        : raw;
+    if (safeRaw && typeof safeRaw === "object" && !Array.isArray(safeRaw)) {
+      const fields = safeRaw as Record<string, unknown>;
+      for (const field of ["label", "icon"] as const) {
+        const value = fields[field];
+        if (typeof value === "string") {
+          let safe = value;
+          for (const secret of this.secrets().filter(Boolean))
+            safe = safe.split(secret).join("[redacted]");
+          fields[field] = safe;
+        }
+      }
+    }
+    const patch = displayActionSchema.parse(safeRaw),
       a = this.validate(context.authority, context.runId, context.actionId),
       origin = a.source.origin!,
       key = originKey(origin),
@@ -241,16 +257,6 @@ export class DisplayState {
       throw new Error(
         "Display cache storage unavailable; repair storage and restart",
       );
-    for (const field of ["label", "icon"] as const) {
-      const value = patch[field];
-      if (value !== undefined) {
-        let safe = value;
-        for (const secret of this.secrets().filter(Boolean))
-          safe = safe.split(secret).join("[redacted]");
-        patch[field] = safe;
-      }
-    }
-    displayUpdateSchema.parse(patch);
     if (patch.asset) await this.validAsset(patch.asset);
     this.validate(context.authority, context.runId, context.actionId);
     const fields: DisplayPatch = { ...this.entries.get(key)?.fields };

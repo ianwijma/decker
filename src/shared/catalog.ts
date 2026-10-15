@@ -1,4 +1,4 @@
-import { displayUpdateSchema } from "./display-contract";
+import { displayActionSchema } from "./display-contract";
 import { z } from "zod";
 import { decodeArgs } from "./data-contract";
 import {
@@ -508,7 +508,7 @@ export const catalog: ActionDefinition[] = definitions.map((d) => {
               ]),
             ),
           );
-  if (d.id === "deck.appearance") schema = displayUpdateSchema;
+  if (d.id === "deck.appearance") schema = displayActionSchema;
   if (d.id === "file.readText") schema = readTextFileSchema;
   if (d.id === "file.writeText" || d.id === "file.appendText")
     schema = mutateTextFileSchema;

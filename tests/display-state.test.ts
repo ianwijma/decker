@@ -1,3 +1,4 @@
+import { displayActionSchema } from "../src/shared/display-contract";
 import { Persistence } from "../src/main/persistence";
 import { cloneProfiles } from "../src/shared/decks";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -546,6 +547,23 @@ describe("last-good display and authority", () => {
       ),
     ).rejects.toThrow("No valid");
     expect(f.display()).toMatchObject({ label: "parallel branch 80" });
+  });
+  it("decodes legacy label/background actions with their existing truncation while validating new partial updates", async () => {
+    const f = await fixture(),
+      run = f.start(),
+      label = "界".repeat(100);
+    expect(
+      displayActionSchema.safeParse({ label, background: "#123456" }).success,
+    ).toBe(true);
+    await f.state.commit({ label, background: "#123456" }, run.context);
+    expect(f.display()).toMatchObject({
+      label: "界".repeat(80),
+      background: "#123456",
+    });
+    await expect(f.state.commit({ label }, run.context)).rejects.toThrow();
+    await expect(
+      f.state.commit({ label, background: "#123456", icon: "x" }, run.context),
+    ).rejects.toThrow();
   });
   it("an Engine hanging handler cannot commit after cancellation even before its final history record", async () => {
     const f = await fixture(),

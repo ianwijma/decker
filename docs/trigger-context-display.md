@@ -3,7 +3,9 @@
 Workspace schema remains **v5**. Runtime context, display authority and last-good
 appearance are separate from authored configuration. Existing `deck.appearance`
 actions remain version 1, with their label/background configuration unchanged.
-The workflow palette calls this action **Update triggering button**; it remains
+Exact legacy label/background objects retain their previous 80-character label
+truncation through a compatible decoder; partial/new field objects reject labels
+beyond that bound. The workflow palette calls this action **Update triggering button**; it remains
 absent from ordinary button palettes. Rendering never executes workflows, toggle
 probes or action assignments.
 
