@@ -9,6 +9,7 @@ import { createServer, type Server } from "node:http";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { defaults } from "../../src/shared/defaults";
 let app: ElectronApplication,
   page: Page,
   directory: string,
@@ -151,7 +152,7 @@ test("discovers all file actions, uses open/save destinations, preserves cancell
   ).toEqual([...Array(5).fill("Choose text file destination"), "open"]);
 });
 
-test("runs HTTP → Parse JSON → Extract → Write → Read → Append with typed templates and persisted schema-v3 configuration", async () => {
+test("runs HTTP → Parse JSON → Extract → Write → Read → Append with typed templates and persisted current-schema configuration", async () => {
   server = createServer((_req, res) =>
     res.end(
       JSON.stringify({ message: "你好 🌏", count: 0, ok: false, directory }),
@@ -284,7 +285,7 @@ test("runs HTTP → Parse JSON → Extract → Write → Read → Append with ty
     `你好 🌏\nRead ${bytes} bytes: 你好 🌏 / 0 / false`,
   );
   const snapshot = await page.evaluate(() => window.decker.snapshot());
-  expect(snapshot.document.schemaVersion).toBe(3);
+  expect(snapshot.document.schemaVersion).toBe(defaults().schemaVersion);
   const records = snapshot.runs
     .filter((r) => r.workflowId === id)
     .at(-1)!.nodes;

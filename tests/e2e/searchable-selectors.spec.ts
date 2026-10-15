@@ -32,7 +32,7 @@ test.afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 async function seed(page: Page) {
-  return page.evaluate(async () => {
+  const ids = await page.evaluate(async () => {
     const snapshot = await window.decker.snapshot(),
       doc = snapshot.document;
     const original = doc.workflows[0];
@@ -72,6 +72,12 @@ async function seed(page: Page) {
     });
     return doc.workflows.map((workflow) => workflow.id);
   });
+  // Direct IPC saves commit before the deferred renderer snapshot arrives.
+  // Observe that document in the UI before an action can edit/save its copy.
+  await expect(page.getByRole("button", { name: /^Profile:/ })).toHaveText(
+    "Profile 0",
+  );
+  return ids;
 }
 async function saved(page: Page) {
   await expect(
@@ -152,6 +158,10 @@ test("change page searches pages and nested folders, preserves missing targets a
     doc.profiles[1].pages[0].name = "Other profile page";
     await window.decker.request({ type: "save", document: doc });
   });
+  // This second fixture save also needs to reach the renderer before editing.
+  await expect(
+    page.getByRole("button", { name: "Tools", exact: true }),
+  ).toBeVisible();
   await page
     .getByRole("button", { name: "Change page / folder", exact: true })
     .click();

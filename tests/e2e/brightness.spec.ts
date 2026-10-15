@@ -19,13 +19,17 @@ async function launch() {
   });
   page = await app.firstWindow();
   await page.getByRole("button", { name: "Deck: My XL", exact: true }).click();
+  // OBS is synthesized by main before runner startup. Keyboard diagnostics
+  // arrive only after the runner's ready/configure handshake, even without X11.
   await expect
     .poll(() =>
-      page.evaluate(
-        async () => (await window.decker.snapshot()).capabilities.length,
+      page.evaluate(async () =>
+        (await window.decker.snapshot()).capabilities.some(
+          (capability) => capability.id === "keyboard",
+        ),
       ),
     )
-    .toBeGreaterThan(0);
+    .toBe(true);
 }
 test.beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), "decker-brightness-e2e-"));
