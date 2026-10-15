@@ -115,3 +115,34 @@ it("captures bearer lookup once for the trusted main bridge, protects errors and
   await expect(handler(a, ctx)).rejects.toThrow(/missing or locked/);
   expect(main).toHaveBeenCalledTimes(1);
 });
+it("preserves validated generated hashes even when a short token matches hash characters", async () => {
+  const d = defaults(),
+    a = makeAction("image.fetch");
+  a.config.credentialRef = "managed:short";
+  const result = {
+    asset: "a".repeat(64),
+    width: 256,
+    height: 256,
+    format: "png",
+    bytes: 500,
+    sourceWidth: 8,
+    sourceHeight: 6,
+    sourceFormat: "png",
+  };
+  const handler = handlers(
+    () => d,
+    () => ({ "managed:short": "a" }),
+    async () => result,
+    new ObsConnections(() => {}),
+  );
+  const output = await handler(a, {
+    signal: new AbortController().signal,
+    runId: "run",
+    actionId: "action",
+    workflowId: d.workflows[0].id,
+  });
+  expect(output).toEqual(result);
+  expect(
+    actionById("image.fetch")!.outputSchema.safeParse(output).success,
+  ).toBe(true);
+});

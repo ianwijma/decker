@@ -60,9 +60,18 @@ export function handlers(
             throw new Error(
               "Image bearer token is missing or locked. Enter or replace it in this action.",
             );
-          return protectSecret(secret, () =>
-            main(action.type, c, { ...context, imageSecret: secret }),
-          );
+          try {
+            // Host output is generated hash/dimension metadata, never source
+            // content. Scrubbing a short token out of a hash would corrupt it.
+            return await main(action.type, c, {
+              ...context,
+              imageSecret: secret,
+            });
+          } catch (error) {
+            return protectSecret(secret, async () => {
+              throw error;
+            });
+          }
         }
         case "app.launch":
           return new Promise((resolve, reject) => {

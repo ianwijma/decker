@@ -492,32 +492,30 @@ async function performMainAction(
       const cImage = fetchImageSchema.parse(c),
         ticket = displayState.beginImage(context);
       try {
-        const value = await protectSecret(context.imageSecret, () =>
-          remoteImages.fetch(
-            cImage,
-            context.signal,
-            context.imageSecret,
-            (image, signal) =>
-              enqueueMutation(async () => {
-                signal.throwIfAborted();
-                const asset = await generatedAssets!.ingest(
-                  image.normalized,
-                  context.runId,
-                  signal,
-                );
-                signal.throwIfAborted();
-                return {
-                  asset,
-                  width: 256,
-                  height: 256,
-                  format: "png",
-                  bytes: image.normalized.length,
-                  sourceWidth: image.sourceWidth,
-                  sourceHeight: image.sourceHeight,
-                  sourceFormat: image.sourceFormat,
-                };
-              }),
-          ),
+        const value = await remoteImages.fetch(
+          cImage,
+          context.signal,
+          context.imageSecret,
+          (image, signal) =>
+            enqueueMutation(async () => {
+              signal.throwIfAborted();
+              const asset = await generatedAssets!.ingest(
+                image.normalized,
+                context.runId,
+                signal,
+              );
+              signal.throwIfAborted();
+              return {
+                asset,
+                width: 256,
+                height: 256,
+                format: "png",
+                bytes: image.normalized.length,
+                sourceWidth: image.sourceWidth,
+                sourceHeight: image.sourceHeight,
+                sourceFormat: image.sourceFormat,
+              };
+            }),
         );
         displayState.imageResult(context, ticket, false);
         return value;
@@ -527,7 +525,9 @@ async function performMainAction(
           configureDevice();
           publish();
         }
-        throw error;
+        return protectSecret(context.imageSecret, async () => {
+          throw error;
+        });
       }
     }
     case "desktop.open":
