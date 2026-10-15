@@ -1,7 +1,8 @@
-# Toggle runtime (PR18 / schema v4)
+# Toggle runtime and editor (schema v5)
 
-PR18 owns v4. PR17 file actions, scheduling, the full toggle editor, two-state
-appearance, dynamic images and physical hardware acceptance are separate work.
+PR18 introduced the v4 runtime. PR19 adds the editor, observed sources and shared
+appearance contract described below. Scheduling, dynamic images and physical
+hardware acceptance remain separate work.
 Ordinary Run workflow bindings retain activity-only behavior and observed media
 feedback is unchanged.
 
@@ -53,7 +54,7 @@ owner+epoch mutation and import/export rekeying apply without exposing values.
 
 The explicit v3 decoder uses pre-toggle bindings. Migration is ordered
 v1→v2→workflow UUID v3→v4, or v2→v3→v4, or v3→v4. Existing documents gain no
-toggles and keep their assignments. Local v4 saves use the current schema;
+toggles and keep their assignments. V4 documents migrate to the current v5 schema on load;
 unsupported future versions are backed up and block writes rather than being
 parsed through a stripping decoder. Exports contain configuration/assets and
 credential placeholders, **no runtime state**. Import allocates fresh toggle
@@ -193,3 +194,138 @@ external drift and Electron simulator/paired-web routing. CI retains source and
 packaged Electron interaction, native smoke, notices and Linux installer checks.
 Physical Stream Deck, real OBS/MPRIS/keyring and host desktop acceptance remain
 pending for the coordinator's consolidated hardware session.
+
+## PR19 editor and schema v5
+
+The current workspace schema is **v5**. Explicit v1/v2/v3/v4 decoders migrate in
+order without synthesizing toggles or running probes. Appearance-only migration
+retains v4 toggle identities and durable stamps. Unsupported future documents
+are preserved in backups and block writes until repaired and restarted.
+
+Select a key and choose **Button mode → Toggle on / off**. The editor stages a
+local draft with independent On and Off targets (action, sequence or workflow).
+It lists any saved Press/Release/Hold assignments and requires an explicit
+retention/replacement choice before committing the complete valid configuration.
+Cancel and selecting another key discard the draft without modifying saved
+assignments. Returning to ordinary mode explicitly retains On or Off as Press,
+or removes both. Ordinary phase editing and Run workflow behavior are unchanged.
+
+Drafts never execute targets or probes. Save the configuration before entering
+managed HTTP secrets; the saved On/Off/Probe slots use the existing opaque owner
+and epoch controls. Image dialogs are guarded by selection/configuration tokens.
+The authored base/on/off previews are separate from **Live saved state**; viewing
+or editing an On preview does not assert that the runtime is on.
+
+A v5 toggle retains the v4 `on`, `off`, and app/custom-probe source fields, with
+these optional appearance fields:
+
+```ts
+appearance?: {
+  on?: { label?: string; icon?: string; asset?: string | null; background?: string };
+  off?: { label?: string; icon?: string; asset?: string | null; background?: string };
+}
+```
+
+Labels are bounded to 80 characters, icons to 100, assets are local 64-character
+SHA-256 hashes, and backgrounds are six-digit hex colors. Omitted fields inherit
+from the authored base. Empty label/icon is an explicit clear; `asset:null`
+removes an inherited image. Authoring an icon also clears an inherited asset
+unless the same override supplies a local asset. **Reset on/off overrides**
+restores inheritance. Export/import includes images used only by these overrides;
+copy/import allocates fresh toggle identities without copying runtime state.
+
+V5 adds this integration-backed source alongside `app` and `external`:
+
+```ts
+source: {
+  kind: "observed";
+  observation:
+    | { kind: "media"; player: string }
+    | { kind: "audio"; target: "microphone" | "speaker" }
+    | { kind: "obs"; connectionId: string;
+        property: "recording" | "streaming" | "scene" | "mute" | "source";
+        name: string; sourceId?: number };
+  onWhen: boolean;
+}
+```
+
+`onWhen:true` means playing, muted, recording/streaming active, matching program
+scene, or enabled scene item. `false` explicitly reverses that meaning. Media's
+blank player uses the lexical default; an explicit player never falls back.
+Paused/stopped is known false; unknown or missing is not false. Audio reads the
+existing default microphone/speaker provider and validates its successful mute
+result. OBS uses only fields exposed by the existing adapter: `recording`,
+`streaming`, `scene`, `mute:<name>`, and `source:<scene>:<sceneItemId>`. Named
+scene/mute/source choices require `name`, scene items additionally require a
+nonnegative `sourceId`, and the OBS connection must exist. Unsupported truth
+sources can use a deliberate custom read-only probe. Workflows are never inferred
+to describe one integration.
+
+Startup, restart, resume and confirmed import activate saved sources. A newly
+saved/replaced source waits for **Test / Refresh saved state** or lifecycle
+activation. Activated observed sources reuse existing adapter events/polls;
+external drift updates state without a press and adds no scheduler or duplicate
+probe command. Unknown/disconnected observations retain the last confirmation as
+stale and disable ambiguous execution. Target success alone cannot confirm an
+integration's state; a no-op reports the actual observation. Each observation
+commit shares the toggle's serialization slot and rejects replaced identities;
+late adapter results are guarded against changed configurations.
+
+The refresh control is disabled for drafts and pending saves. It sends the
+expected saved generation/configuration, checked in main before reconciliation.
+Custom probes should only read state; Decker cannot prove user commands/workflows
+are read-only. Accepted results and privacy boundaries remain as described above.
+App-managed interrupted state offers **I verified state is on/off**, acknowledging
+user-verified state without executing either target. Storage faults retain
+repair/restart guidance and cannot be bypassed with editor controls.
+
+## Shared display composition and PR21 seam
+
+`shared/feedback.ts`'s `buttonAppearance` is the composition contract used by
+Desktop keys, web deck views, and generated device frames, in this order:
+
+1. Authored base appearance.
+2. Confirmed toggle on/off overrides, or ordinary observed integration feedback.
+3. Bounded dynamic/legacy display overrides (`buttonFeedback` label/background).
+4. Temporary running/success/failure activity.
+
+PR21 can extend stage 3 without changing confirmed toggle state or preview
+semantics. No dynamic action/cache/remote image fetch or periodic refresh is
+introduced here. Cancellation/expiry resolves the latest underlying appearance.
+A separate bounded `stateLabel` marker makes on/off/unknown, busy, stale, blocked
+and failed states visible even with uploaded artwork. Ordinary desktop selection retains `aria-pressed`; toggle editor selection uses
+`aria-current` to keep it distinct from confirmed on/off state. State descriptions
+and the dedicated execution control carry toggle meaning. Unknown/busy keys remain selectable for configuration.
+Web keys receive only bounded per-key display/accessibility data (confirmation,
+busy/disabled flags, fixed summary), never global records, identities, stamps or
+private probe output. Web press guards retain pointer/keyboard release handling;
+asset authorization uses the current resolved per-deck view. Device sessions
+compare frame signatures and avoid unchanged native writes when state updates
+refresh views.
+
+Executable toggle fingerprints include On/Off/source and captured relevant
+workflow/alias/connection definitions, excluding base and state artwork.
+Appearance edits retain generation, confirmation, freshness and active handles;
+actual target/probe/source replacement still advances generation and invalidates
+late completions. The durable stamp preserves the original v4 On/Off/source JSON
+order and excludes new appearance fields. Ordinary button identity behavior is
+unchanged.
+
+PR19 tests use fixture commands, mock adapter observations, simulator/Electron,
+paired web input, durable storage fixtures and generated image comparisons.
+Real Stream Deck, desktop MPRIS/audio/OBS and OS keyring acceptance remain pending
+for the coordinator's consolidated host session.
+
+Runner-to-main state requests additionally carry the captured definition
+fingerprint. Main rechecks it inside the mutation queue, so a graph/alias/connection
+edit rejects an obsolete queued prepare/commit/recovery even when its configured
+workflow target and durable stamp are unchanged. This fingerprint is private
+request metadata, not a new stored-record format, preserving valid v4 state.
+
+Post-transition reconciliation and explicit Refresh perform bounded fresh reads
+through the same media/audio providers and OBS connection. They do not declare a
+pre-command cached value fresh merely because a target returned successfully.
+Live polls reuse pending provider reads; deliberate fresh reads supersede older
+samples. Existing live events and polls
+continue unchanged and add no timer. OBS query responses are guarded against
+newer field observations, connection replacement and stale binding definitions.

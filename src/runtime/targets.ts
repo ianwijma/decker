@@ -1,3 +1,4 @@
+import { executableToggle } from "../shared/toggle-identity";
 import { createHash } from "node:crypto";
 import { findWorkflow } from "../shared/workflow-identity";
 import { actionById } from "../shared/catalog";
@@ -13,7 +14,9 @@ import type {
 } from "../shared/schema";
 
 export const toggleStamp = (binding: KeyBinding) =>
-  createHash("sha256").update(JSON.stringify(binding.toggle)).digest("hex");
+  createHash("sha256")
+    .update(JSON.stringify(executableToggle(binding)))
+    .digest("hex");
 
 /** Relevant immutable definitions only: ordinary background saves never probe. */
 export function toggleDefinitionStamp(
@@ -63,10 +66,18 @@ export function toggleDefinitionStamp(
         action,
       );
   }
+  const source = binding.toggle?.source;
+  if (source?.kind === "observed" && source.observation.kind === "obs") {
+    const observedConnectionId = source.observation.connectionId;
+    const connection = document.connections.find(
+      (c) => c.id === observedConnectionId,
+    );
+    if (connection) connections.set(connection.id, connection);
+  }
   return createHash("sha256")
     .update(
       JSON.stringify([
-        binding,
+        executableToggle(binding),
         [...dependencies.values()]
           .map(({ id, revision, graph, inputs, outputs, timeoutMs }) => ({
             id,

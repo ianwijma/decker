@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { AppDocument } from "../shared/schema";
 import { toggleBindings, toggleKey } from "../shared/toggle-contract";
-import { toggleStamp } from "../runtime/targets";
+import { toggleStamp, toggleDefinitionStamp } from "../runtime/targets";
 
 const entrySchema = z
   .object({
@@ -19,6 +19,7 @@ export type ToggleStorageRequest = {
   operation: "read" | "prepare" | "commit" | "recover";
   key: string;
   stamp: string;
+  definitionStamp?: string;
   confirmed?: "on" | "off";
   token?: string;
 };
@@ -27,6 +28,10 @@ export const toggleStorageRequestSchema = z
     operation: z.enum(["read", "prepare", "commit", "recover"]),
     key: z.string().max(1000),
     stamp: z.string().regex(/^[a-f0-9]{64}$/),
+    definitionStamp: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
     confirmed: z.enum(["on", "off"]).optional(),
     token: z.string().min(1).max(160).optional(),
   })
@@ -62,14 +67,26 @@ export class ToggleStorage {
   ): Promise<StoredToggle | null> {
     const request = toggleStorageRequestSchema.parse(raw);
     if (this.failure) throw new Error("Toggle storage unavailable");
+    const bindings = toggleBindings(document);
     const live = new Map(
-      toggleBindings(document).map(({ deckId, binding }) => [
+      bindings.map(({ deckId, binding }) => [
         toggleKey(deckId, binding),
         toggleStamp(binding),
       ]),
     );
     if (live.get(request.key) !== request.stamp)
       throw new Error("Stale toggle identity");
+    if (request.definitionStamp) {
+      const configured = bindings.find(
+        ({ deckId, binding }) => toggleKey(deckId, binding) === request.key,
+      );
+      if (
+        !configured ||
+        toggleDefinitionStamp(configured.binding, document) !==
+          request.definitionStamp
+      )
+        throw new Error("Stale toggle definition");
+    }
     const old = this.entries.get(request.key);
     const previous = old?.stamp === request.stamp ? old : undefined;
     if (request.operation === "read")

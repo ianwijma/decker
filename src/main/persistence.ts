@@ -35,7 +35,15 @@ export function validateDocument(value: unknown): AppDocument {
     unique(p.id);
     for (const page of p.pages) {
       unique(page.id);
-      for (const binding of Object.values(page.keys)) unique(binding.id);
+      for (const binding of Object.values(page.keys)) {
+        unique(binding.id);
+        const source = binding.toggle?.source;
+        if (source?.kind === "observed" && source.observation.kind === "obs") {
+          const observedConnectionId = source.observation.connectionId;
+          if (!doc.connections.some((c) => c.id === observedConnectionId))
+            throw new Error("Missing observed OBS connection");
+        }
+      }
       if (page.parentId && !p.pages.some((x) => x.id === page.parentId))
         throw new Error("Folder parent is missing");
       const path = new Set<string>();
@@ -195,18 +203,18 @@ export class Persistence {
       const raw = await readFile(join(this.directory, "config.json"), "utf8");
       configRead = true;
       const value = JSON.parse(raw);
-      if (value.schemaVersion !== 4) {
+      if (value.schemaVersion !== 5) {
         await copyFile(
           join(this.directory, "config.json"),
           join(this.directory, `migration-backup-${Date.now()}.json`),
         );
-        if (![1, 2, 3].includes(value.schemaVersion))
+        if (![1, 2, 3, 4].includes(value.schemaVersion))
           throw new Error(
             `Unsupported schema version ${value.schemaVersion}; backup saved`,
           );
       }
       document = validateDocument(migrateDocument(value));
-      if (value.schemaVersion !== 4)
+      if (value.schemaVersion !== 5)
         await this.atomic("config.json", JSON.stringify(document, null, 2));
     } catch (error) {
       if (configRead || (error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -281,7 +289,11 @@ export class Persistence {
       ...document.profiles.flatMap((p) =>
         p.pages.flatMap((page) =>
           Object.values(page.keys).flatMap((k) =>
-            k.appearance.asset ? [k.appearance.asset] : [],
+            [
+              k.appearance.asset,
+              k.toggle?.appearance?.on?.asset,
+              k.toggle?.appearance?.off?.asset,
+            ].filter((hash): hash is string => typeof hash === "string"),
           ),
         ),
       ),

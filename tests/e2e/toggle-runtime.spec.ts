@@ -107,9 +107,7 @@ test("desktop and simulator inputs use durable confirmed state across stale save
   const stale = await page.evaluate(
     async () => (await window.decker.snapshot()).document,
   );
-  await page
-    .getByRole("button", { name: "Key 1: Fixture toggle", exact: true })
-    .dblclick();
+  await page.getByRole("button", { name: /^Key 1: Fixture toggle/ }).dblclick();
   await expect
     .poll(() => state())
     .toMatchObject({ confirmed: "on", transitioning: false });
@@ -400,7 +398,14 @@ test("paired web input uses the same toggle runtime and stays independent from t
       .toMatchObject({ confirmed: "on", transitioning: false });
     expect(await readFile(webMarker, "utf8")).toBe("on");
     expect(await state(deckId)).toMatchObject({ confirmed: "off" });
-    expect(JSON.stringify(messages)).not.toContain('"confirmed":');
+    await expect
+      .poll(() => view!.keys[0].toggle)
+      .toMatchObject({
+        confirmed: "on",
+        disabled: false,
+      });
+    expect(JSON.stringify(messages)).not.toContain('"bindingId":');
+    expect(JSON.stringify(messages)).not.toContain('"stamp":');
     expect(JSON.stringify(messages)).not.toContain("stdout");
   } finally {
     ws.close();

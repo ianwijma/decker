@@ -1,3 +1,9 @@
+import {
+  selectToggle,
+  stateAppearance,
+  toggleDisplay,
+} from "./toggle-presentation";
+import type { ToggleState } from "./toggle-contract";
 import type { Json, KeyBinding } from "./schema";
 import {
   mediaAction,
@@ -94,25 +100,40 @@ export function selectBindingRun(
   return matching.findLast((r) => r.status === "running") ?? matching.at(-1);
 }
 
+export type ButtonAppearance = KeyBinding["appearance"] & {
+  stateLabel?: string;
+};
 /** The same composition feeds desktop keys, web views and device frames. */
 export function buttonAppearance(
   binding: KeyBinding,
   observed: Record<string, Json>,
   accent: string,
   deckId: string,
-) {
-  const appearance = observedAppearance(binding, observed, accent);
+  toggles: ToggleState[] = [],
+): ButtonAppearance {
+  const toggle = selectToggle(toggles, binding, deckId);
+  const appearance: ButtonAppearance = binding.toggle
+    ? stateAppearance(
+        binding.appearance,
+        toggle && toggle.confirmed !== "unknown"
+          ? binding.toggle.appearance?.[toggle.confirmed]
+          : undefined,
+      )
+    : observedAppearance(binding, observed, accent);
+  const display = toggleDisplay(binding, toggle);
+  if (display)
+    appearance.stateLabel = `${display.confirmed}${toggle?.transitioning ? " · transitioning" : toggle?.reconciling ? " · reconciling" : toggle?.blocked ? " · blocked" : !toggle?.fresh ? " · stale" : toggle?.error ? " · failed" : ""}`;
   const feedback = observed.buttonFeedback as
     Record<string, Record<string, Json>> | undefined;
   const state = feedback?.[activityKey(deckId, binding)];
+  // PR21 seam: bounded dynamic/legacy display overrides precede temporary activity.
+  if (typeof state?.label === "string") appearance.label = state.label;
+  if (typeof state?.background === "string")
+    appearance.background = state.background;
   if (state?.status === "running") appearance.background = accent;
   else if (state?.status === "success")
     appearance.background = appearance.success;
   else if (state?.status === "failure")
     appearance.background = appearance.error;
-  // Legacy deck.appearance overrides remain independent of transient run activity.
-  if (typeof state?.label === "string") appearance.label = state.label;
-  if (typeof state?.background === "string")
-    appearance.background = state.background;
   return appearance;
 }

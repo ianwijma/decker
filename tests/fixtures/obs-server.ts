@@ -25,7 +25,10 @@ export async function fakeObs(
     server.once("error", reject);
   });
   const frames: { op: number; d: Record<string, unknown> }[] = [];
-  let connections = 0;
+  let connections = 0,
+    scene = "Fixture scene",
+    recording = false,
+    streaming = false;
   server.on("connection", (socket) => {
     connections++;
     const send = (op: number, d: unknown) =>
@@ -64,9 +67,9 @@ export async function fakeObs(
             rpcVersion: 1,
             echoed: options.echo,
           },
-          GetCurrentProgramScene: { currentProgramSceneName: "Fixture scene" },
-          GetRecordStatus: { outputActive: false },
-          GetStreamStatus: { outputActive: false },
+          GetCurrentProgramScene: { currentProgramSceneName: scene },
+          GetRecordStatus: { outputActive: recording },
+          GetStreamStatus: { outputActive: streaming },
           GetInputList: { inputs: [] },
           GetSceneList: { scenes: [] },
         };
@@ -86,6 +89,21 @@ export async function fakeObs(
   return {
     url: `ws://127.0.0.1:${(server.address() as { port: number }).port}`,
     frames,
+    emit: (eventType: string, eventData: Record<string, unknown>) => {
+      if (eventType === "CurrentProgramSceneChanged")
+        scene = String(eventData.sceneName);
+      if (eventType === "RecordStateChanged")
+        recording = Boolean(eventData.outputActive);
+      if (eventType === "StreamStateChanged")
+        streaming = Boolean(eventData.outputActive);
+      for (const socket of server.clients)
+        socket.send(
+          JSON.stringify({
+            op: 5,
+            d: { eventType, eventIntent: 1, eventData },
+          }),
+        );
+    },
     get connections() {
       return connections;
     },

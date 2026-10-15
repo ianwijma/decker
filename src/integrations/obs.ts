@@ -1,13 +1,23 @@
 import type OBSWebSocket from "obs-websocket-js/json";
 import { DisposableObsClient } from "./obs-client";
 import { withCancellation } from "../runtime/cancellation";
-import type { AppDocument, Json } from "../shared/schema";
+import type { AppDocument, Json, ObservationSource } from "../shared/schema";
 export class ObsConnections {
   private state = new Map<string, Record<string, Json>>();
   private generation = 0;
-  private update(id: string, patch: Record<string, Json>) {
-    const value = { ...this.state.get(id), ...patch };
+  private revision = 0;
+  private fieldRevisions = new Map<string, Map<string, number>>();
+  private update(id: string, patch: Record<string, Json>, sampledAt?: number) {
+    const version = sampledAt ?? ++this.revision;
+    const revisions = this.fieldRevisions.get(id) ?? new Map<string, number>();
+    const entries = Object.entries(patch).filter(
+      ([key]) => (revisions.get(key) ?? -1) <= version,
+    );
+    if (!entries.length) return;
+    const value = { ...this.state.get(id), ...Object.fromEntries(entries) };
     this.state.set(id, value);
+    for (const [key] of entries) revisions.set(key, version);
+    this.fieldRevisions.set(id, revisions);
     this.observe(id, value);
   }
   private sessions = new Map<
@@ -37,6 +47,7 @@ export class ObsConnections {
     if (old) {
       this.sessions.delete(connection.id);
       this.state.delete(connection.id);
+      this.fieldRevisions.delete(connection.id);
       this.update(connection.id, { connected: false });
       old.abort.abort();
       void old.client.dispose();
@@ -49,6 +60,10 @@ export class ObsConnections {
       this.sessions.get(connection.id)?.client === client;
     const update = (patch: Record<string, Json>) => {
       if (current()) this.update(connection.id, patch);
+    };
+    const revisions = () => ++this.revision;
+    const sampled = (patch: Record<string, Json>, version: number) => {
+      if (current()) this.update(connection.id, patch, version);
     };
     client.on("ConnectionClosed", () => {
       if (!current()) return;
@@ -86,14 +101,19 @@ export class ObsConnections {
           0,
         );
         if (!current()) throw new Error("OBS configuration changed");
+        const sceneBefore = revisions();
         const scene = await withCancellation(
           client.call("GetCurrentProgramScene"),
           AbortSignal.any([abort.signal, AbortSignal.timeout(3000)]),
           0,
         );
         if (!current()) throw new Error("OBS configuration changed");
-        update({ connected: true, scene: scene.currentProgramSceneName });
+        sampled(
+          { connected: true, scene: scene.currentProgramSceneName },
+          sceneBefore,
+        );
         const observe = async () => {
+          const before = revisions();
           const [recording, streaming, inputs, scenes] = await Promise.all([
             client.call("GetRecordStatus"),
             client.call("GetStreamStatus"),
@@ -101,32 +121,40 @@ export class ObsConnections {
             client.call("GetSceneList"),
           ]);
           if (!current()) return;
-          update({
-            recording: recording.outputActive,
-            streaming: streaming.outputActive,
-          });
+          sampled(
+            {
+              recording: recording.outputActive,
+              streaming: streaming.outputActive,
+            },
+            before,
+          );
           await Promise.allSettled(
             inputs.inputs.slice(0, 64).map(async (input) => {
               if (!current()) return;
               const inputName = String(input.inputName);
+              const before = revisions();
               const result = await client.call("GetInputMute", { inputName });
-              update({ [`mute:${inputName}`]: result.inputMuted });
+              sampled({ [`mute:${inputName}`]: result.inputMuted }, before);
             }),
           );
           await Promise.allSettled(
             scenes.scenes.slice(0, 64).map(async (scene) => {
               if (!current()) return;
               const sceneName = String(scene.sceneName);
+              const before = revisions();
               const result = await client.call("GetSceneItemList", {
                 sceneName,
               });
-              update(
+              sampled(
                 Object.fromEntries(
                   result.sceneItems.map((item) => [
                     `source:${sceneName}:${item.sceneItemId}`,
-                    Boolean(item.sceneItemEnabled),
+                    typeof item.sceneItemEnabled === "boolean"
+                      ? item.sceneItemEnabled
+                      : null,
                   ]),
                 ),
+                before,
               );
             }),
           );
@@ -150,6 +178,83 @@ export class ObsConnections {
     });
     this.sessions.set(connection.id, { client, signature, abort, promise });
     return promise;
+  }
+  /** Bounded read through the existing connection, never an arbitrary OBS request. */
+  async readObservation(
+    connection: AppDocument["connections"][number],
+    password: string | undefined,
+    source: Extract<ObservationSource, { kind: "obs" }>,
+    accept: () => boolean,
+  ): Promise<Record<string, Json>> {
+    const client = await this.get(connection, password),
+      generation = this.generation;
+    const session = this.sessions.get(connection.id);
+    const current = () =>
+      accept() &&
+      generation === this.generation &&
+      this.sessions.get(connection.id)?.client === client;
+    if (!session || !current()) throw new Error("OBS observation replaced");
+    const key =
+      source.property === "scene"
+        ? "scene"
+        : source.property === "mute"
+          ? `mute:${source.name}`
+          : source.property === "source"
+            ? `source:${source.name}:${source.sourceId}`
+            : source.property;
+    const sampledAt = ++this.revision;
+    const newer = () =>
+      (this.fieldRevisions.get(connection.id)?.get(key) ?? -1) > sampledAt;
+    try {
+      const read = async (): Promise<Json> => {
+        if (source.property === "scene")
+          return (await client.call("GetCurrentProgramScene"))
+            .currentProgramSceneName;
+        if (source.property === "recording")
+          return (await client.call("GetRecordStatus")).outputActive;
+        if (source.property === "streaming")
+          return (await client.call("GetStreamStatus")).outputActive;
+        if (source.property === "mute")
+          return (await client.call("GetInputMute", { inputName: source.name }))
+            .inputMuted;
+        const list = await client.call("GetSceneItemList", {
+          sceneName: source.name,
+        });
+        const item = list.sceneItems.find(
+          (item) => item.sceneItemId === source.sourceId,
+        );
+        return typeof item?.sceneItemEnabled === "boolean"
+          ? item.sceneItemEnabled
+          : null;
+      };
+      const value = await withCancellation(
+        read(),
+        AbortSignal.any([session.abort.signal, AbortSignal.timeout(3000)]),
+        0,
+      );
+      if (!current()) throw new Error("OBS observation replaced");
+      // An event received after the query started is newer than its response.
+      if (!newer())
+        this.update(
+          connection.id,
+          {
+            connected: true,
+            [key]:
+              typeof value ===
+              (source.property === "scene" ? "string" : "boolean")
+                ? value
+                : null,
+          },
+          sampledAt,
+        );
+      return { ...this.state.get(connection.id) };
+    } catch (error) {
+      if (current()) {
+        if (newer()) return { ...this.state.get(connection.id) };
+        this.update(connection.id, { [key]: null }, sampledAt);
+      }
+      throw error;
+    }
   }
   async execute(
     connection: AppDocument["connections"][number],
@@ -206,6 +311,7 @@ export class ObsConnections {
     const sessions = [...this.sessions.entries()];
     this.sessions.clear();
     this.state.clear();
+    this.fieldRevisions.clear();
     for (const [id, session] of sessions) {
       session.abort.abort();
       this.update(id, { connected: false });

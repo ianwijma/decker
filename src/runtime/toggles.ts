@@ -1,5 +1,12 @@
+import { observedToggle } from "../shared/toggle-observation";
 import { randomUUID } from "node:crypto";
-import type { AppDocument, KeyBinding, Json, Target } from "../shared/schema";
+import type {
+  AppDocument,
+  KeyBinding,
+  Json,
+  Target,
+  ObservationSource,
+} from "../shared/schema";
 import {
   toggleBindings,
   toggleKey,
@@ -31,6 +38,7 @@ type Entry = {
   busy: boolean;
   ready: Promise<void>;
   handle?: RunHandle;
+  observationActive: boolean;
 };
 export type ToggleStore = (
   request: ToggleStorageRequest,
@@ -62,10 +70,21 @@ export function probeState(value: Json): ConfirmedState | undefined {
 export class Toggles {
   private entries = new Map<string, Entry>();
   private stopped = false;
+  private observations: Record<string, Json> = {};
+  private observationRevision = 0;
   constructor(
     private engine: Engine,
     private storage: ToggleStore,
     private emit: (states: ToggleState[]) => void,
+    private readObservation?: (
+      source: ObservationSource,
+      owner: {
+        deckId: string;
+        bindingId: string;
+        generation: number;
+        definitionStamp: string;
+      },
+    ) => Promise<Record<string, Json>>,
   ) {}
   snapshot() {
     return [...this.entries.values()]
@@ -85,6 +104,7 @@ export class Toggles {
       keep.add(key);
       const previous = this.entries.get(key);
       if (previous?.definitionStamp === definitionStamp) {
+        if (activate) previous.observationActive = true;
         if (activate && !previous.busy) void this.reconcile(deckId, binding.id);
         continue;
       }
@@ -102,6 +122,7 @@ export class Toggles {
           workflowAliases: document.workflowAliases,
         })),
         valid: true,
+        observationActive: activate,
         busy: true,
         ready: Promise.resolve(),
         state: {
@@ -118,7 +139,10 @@ export class Toggles {
       this.entries.set(key, entry);
       entry.ready = this.initialize(entry, activate).finally(() => {
         entry.busy = false;
-        if (entry.valid) this.publish();
+        if (entry.valid) {
+          this.publish();
+          this.refreshObserved(entry);
+        }
       });
     }
     for (const [key, entry] of this.entries)
@@ -135,6 +159,7 @@ export class Toggles {
         operation: "read",
         key: e.key,
         stamp: e.stamp,
+        definitionStamp: e.definitionStamp,
       });
       if (!e.valid) return;
       const source = e.binding.toggle!.source;
@@ -145,8 +170,8 @@ export class Toggles {
         e.state.blocked = true;
         e.state.error = "interrupted";
       }
-      if (source.kind === "external") {
-        if (activate) await this.observe(e);
+      if (source.kind !== "app") {
+        if (activate) await this.observe(e, undefined, true);
       } else e.state.fresh = !e.state.blocked;
     } catch {
       this.fail(e, "storage", true);
@@ -179,29 +204,59 @@ export class Toggles {
     e.handle = handle;
     return handle;
   }
-  private async observe(e: Entry, expected?: ConfirmedState) {
+  private async observe(e: Entry, expected?: ConfirmedState, refresh = false) {
     const source = e.binding.toggle!.source;
-    if (source.kind !== "external" || !e.valid || this.stopped) return;
+    if (source.kind === "app" || !e.valid || this.stopped) return;
     e.state.reconciling = true;
     e.state.fresh = false;
     this.publish();
+    let revision = this.observationRevision;
     try {
-      const result = await this.launch(e, source.probe, true).result;
-      if (!e.valid) return;
-      if (result.status !== "success") {
-        this.fail(
-          e,
-          result.status === "failure" ? "probe-failed" : result.status,
-        );
-        return;
-      }
-      const observed =
-        result.output.status === "available"
-          ? probeState(result.output.value)
-          : undefined;
-      if (!observed) {
-        this.fail(e, "probe-invalid");
-        return;
+      let observed: ConfirmedState | undefined;
+      if (source.kind === "observed") {
+        if (refresh && this.readObservation) {
+          const sample = await this.readObservation(source.observation, {
+            deckId: e.state.deckId,
+            bindingId: e.binding.id,
+            generation: e.binding.generation,
+            definitionStamp: e.definitionStamp,
+          });
+          if (!e.valid) return;
+          this.observations = {
+            ...this.observations,
+            ...structuredClone(sample),
+          };
+          revision = ++this.observationRevision;
+        }
+        const value = observedToggle(source.observation, this.observations);
+        observed =
+          value === undefined
+            ? undefined
+            : value === source.onWhen
+              ? "on"
+              : "off";
+        if (!observed) {
+          this.fail(e, "unavailable");
+          return;
+        }
+      } else {
+        const result = await this.launch(e, source.probe, true).result;
+        if (!e.valid) return;
+        if (result.status !== "success") {
+          this.fail(
+            e,
+            result.status === "failure" ? "probe-failed" : result.status,
+          );
+          return;
+        }
+        observed =
+          result.output.status === "available"
+            ? probeState(result.output.value)
+            : undefined;
+        if (!observed) {
+          this.fail(e, "probe-invalid");
+          return;
+        }
       }
       // A valid external observation can recover a pending/crashed transition.
       try {
@@ -209,6 +264,7 @@ export class Toggles {
           operation: "recover",
           key: e.key,
           stamp: e.stamp,
+          definitionStamp: e.definitionStamp,
           confirmed: observed,
         });
       } catch {
@@ -216,6 +272,10 @@ export class Toggles {
         return;
       }
       if (!e.valid) return;
+      if (source.kind === "observed" && revision !== this.observationRevision) {
+        await this.observe(e, expected);
+        return;
+      }
       e.state.confirmed = observed;
       e.state.fresh = true;
       e.state.blocked = false;
@@ -264,6 +324,7 @@ export class Toggles {
         operation: "prepare",
         key: e.key,
         stamp: e.stamp,
+        definitionStamp: e.definitionStamp,
         token,
         confirmed:
           e.state.confirmed === "unknown" ? undefined : e.state.confirmed,
@@ -290,6 +351,7 @@ export class Toggles {
         operation: "commit",
         key: e.key,
         stamp: e.stamp,
+        definitionStamp: e.definitionStamp,
         token,
         confirmed: confirmed === "unknown" ? undefined : confirmed,
       });
@@ -304,7 +366,11 @@ export class Toggles {
         }
       } else if (result.status === "cancelled") this.fail(e, "cancelled");
       else {
-        await this.observe(e, result.status === "success" ? next : undefined);
+        await this.observe(
+          e,
+          result.status === "success" ? next : undefined,
+          true,
+        );
         if (result.status !== "success" && e.state.fresh)
           e.state.error =
             result.status === "failure" ? "transition-failed" : result.status;
@@ -315,6 +381,38 @@ export class Toggles {
       return false;
     }
   }
+  /** Reuses adapter events/polls, never executes a target or adds a timer. */
+  updateObservations(observed: Record<string, Json>) {
+    this.observations = { ...this.observations, ...structuredClone(observed) };
+    this.observationRevision++;
+    for (const e of this.entries.values()) this.refreshObserved(e);
+  }
+  private refreshObserved(e: Entry) {
+    const source = e.binding.toggle!.source;
+    if (
+      source.kind !== "observed" ||
+      !e.observationActive ||
+      !e.valid ||
+      e.busy ||
+      this.stopped ||
+      e.state.error === "storage"
+    )
+      return;
+    const value = observedToggle(source.observation, this.observations);
+    if (value === undefined) {
+      this.fail(e, "unavailable");
+      this.publish();
+      return;
+    }
+    const confirmed = value === source.onWhen ? "on" : "off";
+    if (e.state.fresh && !e.state.blocked && e.state.confirmed === confirmed)
+      return;
+    e.busy = true;
+    void this.observe(e).finally(() => {
+      e.busy = false;
+      this.refreshObserved(e);
+    });
+  }
   /** Explicit/lifecycle reconciliation only; never a periodic timer. */
   async reconcile(deckId: string, bindingId: string) {
     const e = [...this.entries.values()].find(
@@ -322,8 +420,9 @@ export class Toggles {
     );
     if (!e || !e.valid || e.busy || this.stopped) return false;
     e.busy = true;
+    e.observationActive = true;
     try {
-      await this.observe(e);
+      await this.observe(e, undefined, true);
       return e.state.fresh;
     } finally {
       e.busy = false;
@@ -347,6 +446,7 @@ export class Toggles {
         operation: "recover",
         key: e.key,
         stamp: e.stamp,
+        definitionStamp: e.definitionStamp,
         confirmed,
       });
       if (!e.valid) return false;

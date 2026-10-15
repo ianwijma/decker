@@ -147,7 +147,7 @@ const v3BindingSchema = z.object({
     .default("ignore"),
   limit: z.number().int().min(1).max(16).default(4),
 });
-export const toggleSchema = z
+const v4ToggleSchema = z
   .object({
     on: targetSchema,
     off: targetSchema,
@@ -166,21 +166,98 @@ export const toggleSchema = z
     ]),
   })
   .strict();
+export const observationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("media"), player: z.string().max(200) }).strict(),
+  z
+    .object({
+      kind: z.literal("audio"),
+      target: z.enum(["microphone", "speaker"]),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("obs"),
+      connectionId: id,
+      property: z.enum(["recording", "streaming", "scene", "mute", "source"]),
+      name: z.string().max(200),
+      sourceId: z.number().int().nonnegative().optional(),
+    })
+    .strict()
+    .superRefine((source, ctx) => {
+      if (["scene", "mute", "source"].includes(source.property) && !source.name)
+        ctx.addIssue({
+          code: "custom",
+          path: ["name"],
+          message: "Choose a named OBS target",
+        });
+      if (source.property === "source" && source.sourceId === undefined)
+        ctx.addIssue({
+          code: "custom",
+          path: ["sourceId"],
+          message: "Choose a scene item",
+        });
+    }),
+]);
+export type ObservationSource = z.infer<typeof observationSchema>;
+export const stateAppearanceSchema = z
+  .object({
+    label: z.string().max(80).optional(),
+    icon: z.string().max(100).optional(),
+    asset: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable()
+      .optional(),
+    background: z
+      .string()
+      .regex(/^#[a-fA-F0-9]{6}$/)
+      .optional(),
+  })
+  .strict();
+export type StateAppearance = z.infer<typeof stateAppearanceSchema>;
+export const toggleSchema = v4ToggleSchema.extend({
+  source: z.union([
+    v4ToggleSchema.shape.source,
+    z
+      .object({
+        kind: z.literal("observed"),
+        observation: observationSchema,
+        onWhen: z.boolean(),
+      })
+      .strict(),
+  ]),
+  appearance: z
+    .object({
+      on: stateAppearanceSchema.optional(),
+      off: stateAppearanceSchema.optional(),
+    })
+    .strict()
+    .optional(),
+});
 export type ToggleConfig = z.infer<typeof toggleSchema>;
+const rejectPhases = (
+  binding: {
+    toggle?: unknown;
+    press?: unknown;
+    release?: unknown;
+    longPress?: unknown;
+  },
+  ctx: z.RefinementCtx,
+) => {
+  if (binding.toggle && (binding.press || binding.longPress || binding.release))
+    ctx.addIssue({
+      code: "custom",
+      path: ["toggle"],
+      message:
+        "Toggle mode owns input; remove ordinary press, release and longPress assignments explicitly",
+    });
+};
+const v4BindingSchema = v3BindingSchema
+  .extend({ toggle: v4ToggleSchema.optional() })
+  .superRefine(rejectPhases);
 export const bindingSchema = v3BindingSchema
   .extend({ toggle: toggleSchema.optional() })
-  .superRefine((binding, ctx) => {
-    if (
-      binding.toggle &&
-      (binding.press || binding.longPress || binding.release)
-    )
-      ctx.addIssue({
-        code: "custom",
-        path: ["toggle"],
-        message:
-          "Toggle mode owns input; remove ordinary press, release and longPress assignments explicitly",
-      });
-  });
+  .superRefine(rejectPhases);
 export type KeyBinding = z.infer<typeof bindingSchema>;
 const v3PageSchema = z.object({
   id,
@@ -316,9 +393,31 @@ const validateAliases = (
 export const v3DocumentSchema =
   documentObjectSchema.superRefine(validateAliases);
 export type V3Document = z.infer<typeof v3DocumentSchema>;
-export const documentSchema = documentObjectSchema
+export const v4DocumentSchema = documentObjectSchema
   .extend({
     schemaVersion: z.literal(4),
+    profiles: z
+      .array(
+        v3ProfileSchema.extend({
+          pages: z
+            .array(
+              v3PageSchema.extend({
+                keys: z.record(
+                  z.string().regex(/^\d{1,3}$/),
+                  v4BindingSchema.strict(),
+                ),
+              }),
+            )
+            .min(1)
+            .max(100),
+        }),
+      )
+      .max(200),
+  })
+  .superRefine(validateAliases);
+export const documentSchema = documentObjectSchema
+  .extend({
+    schemaVersion: z.literal(5),
     profiles: z.array(profileSchema).max(200),
   })
   .superRefine(validateAliases);
@@ -437,9 +536,16 @@ export const requestSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("cancel"), runId: id }),
   z.object({ type: z.literal("activateToggles") }),
-  z.object({ type: z.literal("reconcileToggle"), deckId: id, bindingId: id }),
+  z.object({
+    type: z.literal("reconcileToggle"),
+    deckId: id,
+    bindingId: id,
+    generation: z.number().int().nonnegative().optional(),
+    expectedToggle: toggleSchema.optional(),
+  }),
   z.object({
     type: z.literal("recoverToggle"),
+    generation: z.number().int().nonnegative().optional(),
     deckId: id,
     bindingId: id,
     confirmed: z.enum(["on", "off"]),
@@ -550,6 +656,8 @@ export const runRecordSchema: z.ZodType<RunRecord> = z.object({
 });
 
 export type WebKey = {
+  stateLabel?: string;
+  toggle?: import("./toggle-presentation").ToggleDisplay;
   label: string;
   icon: string;
   background: string;

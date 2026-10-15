@@ -199,3 +199,14 @@ footer {
     transition: none !important;
   }
 }
+.key .toggle-state {
+  position: absolute;
+  z-index: 2;
+  inset: 2px 2px auto;
+  color: #fff;
+  background: #000d;
+  border-radius: 4px;
+  padding: 3px;
+  font-size: clamp(8px, 1.6vw, 12px);
+  line-height: 1.2;
+}

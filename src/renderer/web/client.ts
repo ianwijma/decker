@@ -67,6 +67,29 @@ function offline(message = "Offline · reconnecting…") {
     button.classList.remove("pressed");
   }
 }
+function keyAccessibility(
+  button: HTMLButtonElement,
+  key: WebDeckView["keys"][number] | undefined,
+  index: number,
+) {
+  button.setAttribute(
+    "aria-label",
+    `${key?.label || `${key?.toggle ? "Key" : "Empty key"} ${index + 1}`}${key?.toggle ? ` · ${key.toggle.summary}` : ""}`,
+  );
+  button.setAttribute("aria-busy", String(Boolean(key?.toggle?.busy)));
+  if (key?.toggle)
+    button.setAttribute(
+      "aria-pressed",
+      key.toggle.confirmed === "unknown"
+        ? "mixed"
+        : String(key.toggle.confirmed === "on"),
+    );
+  else button.removeAttribute("aria-pressed");
+  button.setAttribute(
+    "aria-disabled",
+    String(!key || Boolean(key.toggle?.disabled)),
+  );
+}
 function renderKey(
   button: HTMLButtonElement,
   key: WebDeckView["keys"][number] | undefined,
@@ -84,9 +107,14 @@ function renderKey(
       icon.setAttribute("aria-hidden", "true");
       icon.innerHTML = svg;
       button.append(icon);
-    } else button.append(element("span", key?.icon || "✦", "symbol"));
+    } else
+      button.append(
+        element("span", key?.icon || (key?.toggle ? "" : "✦"), "symbol"),
+      );
   }
   button.append(element("span", key?.label ?? "", "label"));
+  if (key?.stateLabel)
+    button.append(element("small", key.stateLabel, "toggle-state"));
 }
 function render(next: WebDeckView) {
   const changed =
@@ -112,7 +140,7 @@ function render(next: WebDeckView) {
         !key &&
         ![...pointers.values()].includes(index) &&
         !keyboardHeld.has(index);
-      button.setAttribute("aria-label", key?.label || `Empty key ${index + 1}`);
+      keyAccessibility(button, key, index);
       renderKey(button, key);
     }
     return;
@@ -131,11 +159,17 @@ function render(next: WebDeckView) {
       button = element("button", undefined, "key");
     button.dataset.key = String(index);
     button.disabled = !key;
-    button.setAttribute("aria-label", key?.label || `Empty key ${index + 1}`);
+    keyAccessibility(button, key, index);
     button.style.backgroundColor = key?.background ?? "#232428";
     renderKey(button, key);
     button.addEventListener("pointerdown", (event) => {
-      if (!ready || event.button !== 0 || !view?.keys[index]) return;
+      if (
+        !ready ||
+        event.button !== 0 ||
+        !view?.keys[index] ||
+        view.keys[index].toggle?.disabled
+      )
+        return;
       event.preventDefault();
       button.setPointerCapture(event.pointerId);
       pointers.set(event.pointerId, index);
@@ -161,6 +195,13 @@ function render(next: WebDeckView) {
     button.addEventListener("keydown", (event) => {
       if (event.repeat || ![" ", "Enter"].includes(event.key)) return;
       event.preventDefault();
+      if (
+        !ready ||
+        !view?.keys[index] ||
+        view.keys[index].toggle?.disabled ||
+        keyboardHeld.has(index)
+      )
+        return;
       keyboardHeld.add(index);
       button.classList.add("pressed");
       send({ type: "down", key: index, version });

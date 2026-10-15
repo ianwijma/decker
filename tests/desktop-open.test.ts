@@ -232,6 +232,6 @@ it("round trips old and new assignments and bindings under schema v3", async () 
     (await store.export((await store.load()).document)).document,
   );
   expect(documentSchema.parse(imported)).toEqual(doc);
-  expect(imported.schemaVersion).toBe(4);
+  expect(imported.schemaVersion).toBe(5);
   expect(imported.workflowAliases).toEqual(doc.workflowAliases);
 });

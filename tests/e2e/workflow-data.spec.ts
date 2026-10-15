@@ -31,6 +31,16 @@ async function launch() {
   });
   page = await app.firstWindow();
   await page.getByRole("button", { name: "Deck: My XL", exact: true }).click();
+  // Main can publish its OBS capability before the runner handshake completes.
+  await expect
+    .poll(() =>
+      page.evaluate(async () =>
+        (await window.decker.snapshot()).capabilities.some(
+          (c) => c.id === "keyboard",
+        ),
+      ),
+    )
+    .toBe(true);
 }
 async function notifications() {
   return app.evaluate(

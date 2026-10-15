@@ -1,0 +1,65 @@
+.toggle-editor {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+.toggle-editor fieldset {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--border, #45464b);
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+.toggle-editor p,
+.toggle-editor li {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.toggle-editor select {
+  max-width: 100%;
+}
+.toggle-editor .toggle-status {
+  border: 1px solid #70717a;
+  border-radius: 6px;
+  padding: 8px;
+}
+.toggle-preview {
+  display: grid;
+  gap: 6px;
+}
+.toggle-preview > div {
+  width: 96px;
+  min-height: 96px;
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  overflow-wrap: anywhere;
+}
+.toggle-preview img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+}
+.toggle-preview span {
+  font-size: 12px;
+}
+.toggle-draft {
+  border: 1px solid #70717a;
+  padding: 8px;
+  border-radius: 6px;
+}
+.deck-workspace .deck-key .toggle-key-state {
+  position: absolute;
+  z-index: 2;
+  inset: 2px 2px auto;
+  color: #fff;
+  background: #000d;
+  border-radius: 3px;
+  padding: 2px;
+  font-size: 8px;
+  line-height: 1.2;
+}
