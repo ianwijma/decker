@@ -122,7 +122,10 @@ restart; no automatic rollback or replay occurs.
 
 Configuration is a partial object with optional `label`, `background`, `icon`,
 `asset` and `reset`. The UI enables fields explicitly and uses existing binding
-modes, Lucide selection and local upload controls. At dispatch and commit, labels
+modes, Lucide selection and local upload controls. Workflow image choosers use
+workflow/node identity and the document epoch, so unchanged snapshot clones do
+not discard results while edits, replacement or navigation invalidate them.
+At dispatch and commit, labels
 are bounded to 80 characters, icons to 100, colors to six-digit hex, and assets to
 existing SHA-256 local PNG/JPEG/WebP content hashes. UTF-8 remains intact. No URL, filesystem
 path or SVG document is accepted as an asset. Icon tokens use the existing bundled

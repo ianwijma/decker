@@ -11,6 +11,9 @@ import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Json } from "../../src/shared/schema";
+type ImageDialogFixture = typeof globalThis & {
+  releaseImageDialog?: () => void;
+};
 let app: ElectronApplication, page: Page, directory: string, server: Server;
 async function launch() {
   const executablePath = process.env.DECKER_EXECUTABLE;
@@ -274,10 +277,11 @@ test("local image control updates a saved key and supports partial fields withou
     .png()
     .toFile(imagePath);
   await app.evaluate(({ dialog }, path) => {
-    dialog.showOpenDialog = async () => ({
-      canceled: false,
-      filePaths: [path],
-    });
+    dialog.showOpenDialog = () =>
+      new Promise((resolve) => {
+        (globalThis as ImageDialogFixture).releaseImageDialog = () =>
+          resolve({ canceled: false, filePaths: [path] });
+      });
   }, imagePath);
   await page.getByRole("button", { name: "Flows", exact: true }).click();
   await page.locator('.react-flow__node[data-id="update"]').click();
@@ -293,6 +297,23 @@ test("local image control updates a saved key and supports partial fields withou
   });
   await expect(chooser).toBeEnabled();
   await chooser.click();
+  await expect(chooser).toHaveText("Choosing…");
+  // Status snapshots clone the document while the canvas keeps stable objects.
+  // An unchanged owner must survive this publication without relaxing edit guards.
+  await page.evaluate(async (deckId) => {
+    const published = new Promise<void>((resolve) => {
+      const unsubscribe = window.decker.subscribe(() => {
+        unsubscribe();
+        resolve();
+      });
+    });
+    await window.decker.request({ type: "selectDeck", deckId });
+    await published;
+  }, ids.deckId);
+  await expect(chooser).toHaveText("Choosing…");
+  await app.evaluate(() =>
+    (globalThis as ImageDialogFixture).releaseImageDialog!(),
+  );
   await expect
     .poll(() =>
       page.evaluate(

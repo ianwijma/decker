@@ -98,11 +98,13 @@ export function ActionFields({
   onChange,
   bindings = false,
   choices = [],
+  ownerScope,
 }: {
   action: ActionInstance;
   onChange: (action: ActionInstance) => void;
   bindings?: boolean;
   choices?: DataChoice[];
+  ownerScope?: string;
 }) {
   const workflows = useApp(selectFlowWorkflows),
     aliases = useApp(selectWorkflowAliases);
@@ -114,7 +116,8 @@ export function ActionFields({
       deck?.id,
       deck?.activeProfileId,
       deck?.activePageId,
-      actionLocation(doc, action),
+      ownerScope ?? actionLocation(doc, action),
+      state.snapshot?.credentialState?.epoch,
     ]);
   });
   const definition = actionById(action.type);
