@@ -224,10 +224,17 @@ export class GeneratedAssets {
           createHash("sha256").update(current).digest("hex") === hash
         ) {
           const stat = lstatSync(path);
-          if (stat.isFile() && stat.ino === entry.ino) unlinkSync(path);
+          if (stat.isFile() && stat.ino === entry.ino) {
+            unlinkSync(path);
+            // Persist deletion before durably dropping its ownership record.
+            this.syncDirectory(this.assets);
+          }
         }
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          this.blocked = true;
+          throw error;
+        }
       }
       this.entries.delete(hash);
       total -= entry.bytes;
