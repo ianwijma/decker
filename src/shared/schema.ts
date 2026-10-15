@@ -1,3 +1,4 @@
+import { scheduleSchema, MAX_SCHEDULES, type ScheduleState } from "./schedules";
 import {
   executionContextSchema,
   type ExecutionContext,
@@ -419,12 +420,27 @@ export const v4DocumentSchema = documentObjectSchema
       .max(200),
   })
   .superRefine(validateAliases);
-export const documentSchema = documentObjectSchema
+export const v5DocumentSchema = documentObjectSchema
   .extend({
     schemaVersion: z.literal(5),
     profiles: z.array(profileSchema).max(200),
   })
   .superRefine(validateAliases);
+export const documentSchema = documentObjectSchema
+  .extend({
+    schemaVersion: z.literal(6),
+    profiles: z.array(profileSchema).max(200),
+    schedules: z.array(scheduleSchema).max(MAX_SCHEDULES).default([]),
+  })
+  .superRefine((doc, ctx) => {
+    validateAliases(doc, ctx);
+    if (new Set(doc.schedules.map((s) => s.id)).size !== doc.schedules.length)
+      ctx.addIssue({
+        code: "custom",
+        path: ["schedules"],
+        message: "Schedule IDs must be unique",
+      });
+  });
 export type AppDocument = z.infer<typeof documentSchema>;
 export type RunStatus =
   "running" | "success" | "failure" | "cancelled" | "interrupted";
@@ -501,6 +517,7 @@ export type CredentialStatus =
   "configured" | "missing" | "locked" | "session-only";
 export type Snapshot = {
   document: AppDocument;
+  schedules?: ScheduleState[];
   toggles?: import("./toggle-contract").ToggleState[];
   runs: RunRecord[];
   devices: DeviceStatus[];
@@ -516,6 +533,21 @@ export type Snapshot = {
   web: WebStatus;
 };
 export const requestSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("scheduleEnable"),
+      id: z.uuid(),
+      enabled: z.boolean(),
+      expected: scheduleSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("schedulePreview"),
+      schedule: scheduleSchema,
+      count: z.number().int().min(1).max(5).default(3),
+    })
+    .strict(),
   obsTestRequestSchema,
   obsSaveRequestSchema,
   obsCancelRequestSchema,

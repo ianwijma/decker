@@ -1,3 +1,4 @@
+import { CURRENT_SCHEMA_VERSION } from "../../src/shared/schedules";
 import {
   test,
   expect,
@@ -121,7 +122,7 @@ test("offers six Media tiles in both libraries, keeps legacy editing and persist
   const reloaded = (await page.evaluate(() => window.decker.snapshot()))
     .document;
   expect(reloaded.profiles).toEqual(doc.profiles);
-  expect(reloaded.schemaVersion).toBe(5);
+  expect(reloaded.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
   expect(reloaded.workflowAliases).toEqual(doc.workflowAliases);
 });
 

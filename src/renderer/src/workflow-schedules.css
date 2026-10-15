@@ -1,0 +1,24 @@
+.workflow-schedules {
+  margin-block: 20px;
+  border-block: 1px solid var(--border);
+  padding-block: 12px;
+}
+.workflow-schedules .schedule-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-block: 10px;
+  overflow-wrap: anywhere;
+}
+.workflow-schedules .row {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.workflow-schedules textarea {
+  width: 100%;
+  min-height: 80px;
+}
+.workflow-schedules ol {
+  padding-left: 18px;
+  font-size: 12px;
+}

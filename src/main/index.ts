@@ -1,3 +1,11 @@
+import { Scheduler } from "./scheduler";
+import { ScheduledRunner } from "./scheduled-runner";
+import { ScheduleWatermarks } from "./schedule-watermarks";
+import {
+  preserveScheduleActivation,
+  previewSchedule,
+  scheduleError,
+} from "../shared/schedules";
 import { DisplayState, displayObserved } from "./display-state";
 import { captureOrigin, originBinding } from "../shared/trigger-context";
 import {
@@ -90,6 +98,18 @@ let window: BrowserWindow | undefined,
   toggleStorage: ToggleStorage,
   displayState: DisplayState;
 let toggleStates: ToggleState[] = [];
+let scheduler: Scheduler | undefined;
+let scheduleWatermarks: ScheduleWatermarks;
+let scheduleConfiguration = "";
+let suspended = false;
+const scheduledRunner = new ScheduledRunner(
+  (message) => post("runner", message),
+  (schedule) => {
+    const launch = displayState.accept("scheduled");
+    launch.source.schedule = { id: schedule.id, name: schedule.name };
+    return launch;
+  },
+);
 let document: AppDocument = defaults(),
   runs: RunRecord[] = [],
   devices: Snapshot["devices"] = [],
@@ -148,6 +168,7 @@ const snapshot = (): Snapshot => {
   );
   return {
     document,
+    schedules: scheduler?.snapshot() ?? [],
     toggles: toggleStates.filter((state) =>
       liveToggles.has(
         toggleKey(state.deckId, {
@@ -373,6 +394,9 @@ function configureDevice() {
   configureWeb();
 }
 function configure(activateToggles = false) {
+  scheduleConfiguration = uid();
+  scheduler?.configure(document);
+  scheduler?.ready(false);
   feedback.reconcile(document);
   displayState?.reconcile();
   for (const key of Object.keys(observed))
@@ -383,6 +407,7 @@ function configure(activateToggles = false) {
       delete observed[key];
   post("runner", {
     type: "configure",
+    scheduleConfiguration,
     document,
     credentials: credentials.all(),
     activateToggles,
@@ -593,7 +618,19 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
           diagnostic(message.error, `worker:${name}`, `${name} service`);
         return;
       }
-      if (message.type === "displayInvocation") {
+      if (message.type === "scheduleConfigured") {
+        if (
+          message.configuration === scheduleConfiguration &&
+          !suspended &&
+          !quitting
+        )
+          scheduler?.ready(true);
+      } else if (
+        message.type === "scheduleAccepted" ||
+        message.type === "scheduleSettled"
+      ) {
+        scheduledRunner.message(message);
+      } else if (message.type === "displayInvocation") {
         if (message.operation === "begin")
           displayState.begin(message.authority, message.runId);
         else displayState.end(message.authority);
@@ -714,6 +751,8 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         errorDetails: undefined,
       }));
     } else if (name === "runner") {
+      scheduler?.pause();
+      scheduledRunner.stop();
       displayState.invalidate();
       toggleStates = toggleStates.map((state) => ({
         ...state,
@@ -809,6 +848,7 @@ function handle(raw: unknown) {
   // remain responsive while storage or a native dialog is pending.
   return [
     "save",
+    "scheduleEnable",
     "credential",
     "obsSave",
     "import",
@@ -823,8 +863,25 @@ function handle(raw: unknown) {
 }
 async function handleRequest(request: Request) {
   switch (request.type) {
+    case "schedulePreview":
+      return previewSchedule(request.schedule, Date.now(), request.count);
+    case "scheduleEnable": {
+      const saved = document.schedules.find((s) => s.id === request.id);
+      if (!saved || JSON.stringify(saved) !== JSON.stringify(request.expected))
+        throw new Error("Schedule changed; reopen it and retry");
+      const error = scheduleError(saved, document);
+      if (request.enabled && error) throw new Error(error);
+      const next = structuredClone(document);
+      next.schedules.find((s) => s.id === request.id)!.enabled =
+        request.enabled;
+      await store.save(next, runs);
+      document = next;
+      configure();
+      return snapshot();
+    }
     case "save": {
       const next = request.document;
+      preserveScheduleActivation(document, next);
       preserveNavigation(document, next, request.navigationEdits);
       preserveBrightness(document, next, request.brightnessEdits);
       validateDocument(next);
@@ -1200,6 +1257,7 @@ async function handleRequest(request: Request) {
       );
       await store.importAssets(imported.assets ?? {});
       triggers.disconnect();
+      scheduler?.pause();
       displayState.invalidate();
       for (const r of runs.filter((r) => r.status === "running"))
         post("runner", { type: "cancel", id: r.id });
@@ -1277,6 +1335,25 @@ if (locked)
     const loaded = await store.load();
     document = loaded.document;
     runs = loaded.runs;
+    scheduleWatermarks = new ScheduleWatermarks(app.getPath("userData"));
+    await scheduleWatermarks.load();
+    scheduler = new Scheduler({
+      now: () => Date.now(),
+      monotonic: () => performance.now(),
+      setTimer: (callback, delay) => setTimeout(callback, delay),
+      clearTimer: (timer) =>
+        clearTimeout(timer as ReturnType<typeof setTimeout>),
+      claim: (id, at) =>
+        scheduleWatermarks.claim(
+          id,
+          at,
+          document.schedules.map((s) => s.id),
+        ),
+      watermark: (id) => scheduleWatermarks.get(id),
+      launch: (schedule, token, signal) =>
+        scheduledRunner.launch(schedule, token, signal, scheduleConfiguration),
+      changed: publish,
+    });
     toggleStorage = new ToggleStorage(app.getPath("userData"));
     await toggleStorage.load();
     displayState = new DisplayState(
@@ -1341,8 +1418,14 @@ if (locked)
     startWorker("runner");
     startWorker("device");
     startWorker("web");
-    powerMonitor.on("suspend", () => triggers.disconnect());
+    powerMonitor.on("suspend", () => {
+      suspended = true;
+      scheduler?.pause();
+      triggers.disconnect();
+    });
     powerMonitor.on("resume", () => {
+      suspended = false;
+      configure();
       triggers.disconnect();
       post("device", { type: "refresh" });
       post("runner", { type: "activateToggles" });
@@ -1355,6 +1438,8 @@ app.on("before-quit", (event) => {
   if (quitting) return;
   event.preventDefault();
   quitting = true;
+  scheduler?.stop();
+  scheduledRunner.stop();
   obsTests.close();
   triggers.disconnect();
   displayState?.invalidate();

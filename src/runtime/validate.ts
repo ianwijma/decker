@@ -57,7 +57,9 @@ export function validateWorkflow(
                 ].includes(key) &&
                   field === undefined) ||
                 (key === "source" &&
-                  (field === undefined || field === "kind")) ||
+                  (field === undefined ||
+                    field === "kind" ||
+                    field === "schedule")) ||
                 (key === "origin" &&
                   (field === undefined ||
                     [
@@ -68,11 +70,26 @@ export function validateWorkflow(
                       "generation",
                     ].includes(field))) ||
                 key === undefined;
-              if (!known || rest.length)
+              if (
+                !known ||
+                (rest.length &&
+                  !(
+                    key === "source" &&
+                    field === "schedule" &&
+                    rest.length === 1 &&
+                    ["id", "name"].includes(String(rest[0]))
+                  ))
+              )
                 errors.push(`${label}: unknown trigger context field`);
-              if (key === "origin" && field !== undefined && !hasFallback)
+              if (
+                ((key === "origin" && field !== undefined) ||
+                  (key === "source" && field === "schedule")) &&
+                !hasFallback
+              )
                 errors.push(
-                  `${label}: triggering button may be unavailable; add a fallback`,
+                  key === "source"
+                    ? `${label}: schedule metadata may be unavailable; add a fallback`
+                    : `${label}: triggering button may be unavailable; add a fallback`,
                 );
             }
             if (

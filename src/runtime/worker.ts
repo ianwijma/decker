@@ -1,3 +1,4 @@
+import { ScheduledRuns } from "./scheduled-runs";
 import { launchSourceSchema, originBinding } from "../shared/trigger-context";
 import { toggleBindings } from "../shared/toggle-contract";
 import { targetWorkflow, toggleDefinitionStamp } from "./targets";
@@ -126,6 +127,8 @@ const engine = new Engine(
     Boolean(originBinding(document, launch.source.origin)),
 );
 const coordinator = new Coordinator(engine);
+const scheduled = new ScheduledRuns(engine, send);
+let scheduleConfiguration = "";
 const storageReplies = new Map<
   string,
   {
@@ -249,7 +252,19 @@ const toggles = new Toggles(
 );
 const schema = z.discriminatedUnion("type", [
   z.object({
+    type: z.literal("scheduleRun"),
+    token: z.uuid(),
+    configuration: z.string(),
+    scheduleId: z.uuid(),
+    launch: z.object({
+      source: launchSourceSchema,
+      authority: z.string().optional(),
+    }),
+  }),
+  z.object({ type: z.literal("scheduleCancel"), token: z.uuid() }),
+  z.object({
     type: z.literal("configure"),
+    scheduleConfiguration: z.string().optional(),
     document: documentSchema,
     credentials: z.record(z.string(), z.string()),
     activateToggles: z.boolean().optional(),
@@ -329,6 +344,18 @@ port.on("message", async (event) => {
   try {
     const message = schema.parse(event.data);
     switch (message.type) {
+      case "scheduleRun":
+        scheduled.start(
+          document,
+          message.scheduleId,
+          message.token,
+          message.launch,
+          message.configuration === scheduleConfiguration,
+        );
+        break;
+      case "scheduleCancel":
+        scheduled.cancel(message.token);
+        break;
       case "configure": {
         const epoch = ++configurationEpoch;
         const changed =
@@ -336,6 +363,11 @@ port.on("message", async (event) => {
             JSON.stringify(message.document.connections) ||
           JSON.stringify(credentials) !== JSON.stringify(message.credentials);
         document = message.document;
+        scheduleConfiguration = message.scheduleConfiguration ?? "";
+        send({
+          type: "scheduleConfigured",
+          configuration: scheduleConfiguration,
+        });
         credentials = message.credentials;
         if (changed)
           for (const id of Object.keys(observations))
@@ -432,6 +464,7 @@ port.on("message", async (event) => {
         void diagnose();
         break;
       case "stop":
+        scheduled.stop();
         toggles.stop();
         for (const pending of storageReplies.values()) {
           clearTimeout(pending.timer);

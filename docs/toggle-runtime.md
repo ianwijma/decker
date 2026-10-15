@@ -1,5 +1,8 @@
 # Toggle runtime and editor (schema v5)
 
+PR19 introduced the v5 format described here. [Workflow schedules](workflow-schedules.md)
+advance the current workspace to v6 without changing toggle or display-cache formats.
+
 PR18 introduced the v4 runtime. PR19 adds the editor, observed sources and shared
 appearance contract described below. Scheduling, dynamic images and physical
 hardware acceptance remain separate work.

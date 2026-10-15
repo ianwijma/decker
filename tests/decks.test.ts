@@ -36,7 +36,7 @@ it("migrates independent deck profiles, remaps folders and preserves original ID
   enter.press.action.config.pageId = "folder";
   old.profiles[0].pages[0].keys[8] = enter;
   const doc = migrateDocument(old);
-  expect(doc.schemaVersion).toBe(5);
+  expect(doc.schemaVersion).toBe(defaults().schemaVersion);
   expect(doc.decks).toHaveLength(2);
   expect(doc.decks[1].brightness).toBe(45);
   expect(doc.profiles[0].pages[0].keys[16].id).toBe(enter.id);
@@ -54,7 +54,7 @@ it("backs up and persists v1 migration once, with no loss of assignments", async
     const store = new Persistence(directory);
     const result = await store.load();
     expect(result.warning).toBeUndefined();
-    expect(result.document.schemaVersion).toBe(5);
+    expect(result.document.schemaVersion).toBe(defaults().schemaVersion);
     expect(
       (await readdir(directory)).filter((f) =>
         f.startsWith("migration-backup-"),
@@ -63,7 +63,7 @@ it("backs up and persists v1 migration once, with no loss of assignments", async
     expect(
       JSON.parse(await readFile(join(directory, "config.json"), "utf8"))
         .schemaVersion,
-    ).toBe(5);
+    ).toBe(defaults().schemaVersion);
     expect((await store.load()).document).toEqual(result.document);
   } finally {
     await rm(directory, { recursive: true, force: true });

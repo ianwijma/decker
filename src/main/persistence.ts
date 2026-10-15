@@ -1,3 +1,4 @@
+import { CURRENT_SCHEMA_VERSION } from "../shared/schedules";
 import { targetWorkflow } from "../runtime/targets";
 import { bindingTargets } from "../shared/binding-targets";
 import { rekeyCredentials } from "../shared/credential-owners";
@@ -56,6 +57,7 @@ export function validateDocument(value: unknown): AppDocument {
     }
   }
   for (const f of doc.workflows) unique(f.id);
+  for (const schedule of doc.schedules) unique(schedule.id);
   for (const c of doc.connections) {
     unique(c.id);
     const url = new URL(c.url);
@@ -180,6 +182,10 @@ export function validateImport(value: unknown): AppDocument {
           binding.id = randomUUID();
           binding.generation = 0;
         }
+  for (const schedule of doc.schedules) {
+    schedule.enabled = false;
+    schedule.id = randomUUID();
+  }
   return doc;
 }
 export class Persistence {
@@ -203,18 +209,18 @@ export class Persistence {
       const raw = await readFile(join(this.directory, "config.json"), "utf8");
       configRead = true;
       const value = JSON.parse(raw);
-      if (value.schemaVersion !== 5) {
+      if (value.schemaVersion !== CURRENT_SCHEMA_VERSION) {
         await copyFile(
           join(this.directory, "config.json"),
           join(this.directory, `migration-backup-${Date.now()}.json`),
         );
-        if (![1, 2, 3, 4].includes(value.schemaVersion))
+        if (![1, 2, 3, 4, 5].includes(value.schemaVersion))
           throw new Error(
             `Unsupported schema version ${value.schemaVersion}; backup saved`,
           );
       }
       document = validateDocument(migrateDocument(value));
-      if (value.schemaVersion !== 5)
+      if (value.schemaVersion !== CURRENT_SCHEMA_VERSION)
         await this.atomic("config.json", JSON.stringify(document, null, 2));
     } catch (error) {
       if (configRead || (error as NodeJS.ErrnoException).code !== "ENOENT") {

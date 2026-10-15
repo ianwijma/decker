@@ -29,7 +29,7 @@ export function findWorkflow(
 }
 
 export function migrateWorkflowIdentities(
-  document: Omit<AppDocument, "schemaVersion" | "workflowAliases">,
+  document: Omit<V3Document, "schemaVersion" | "workflowAliases">,
 ): V3Document {
   const doc = structuredClone(document);
   const ids = [

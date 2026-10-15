@@ -139,6 +139,12 @@ export function Runs() {
                 )}
                 <div>
                   <strong>{r.workflowName}</strong>
+                  {r.context?.source.kind === "scheduled" && (
+                    <small>
+                      Scheduled ·{" "}
+                      {r.context.source.schedule?.name ?? "Schedule"}
+                    </small>
+                  )}
                   <small>
                     {new Date(r.startedAt).toLocaleString()} · revision{" "}
                     {r.revision}
@@ -168,6 +174,13 @@ export function Runs() {
                 )}
               </div>
               <p className="muted small">
+                {run.context?.source.kind === "scheduled" && (
+                  <>
+                    Scheduled ·{" "}
+                    {run.context.source.schedule?.name ?? "Schedule"}
+                    <br />
+                  </>
+                )}
                 {run.id}
                 <br />
                 {snapshot!.document.decks.find((d) => d.id === run.deckId)

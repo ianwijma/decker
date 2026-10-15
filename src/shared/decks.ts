@@ -5,6 +5,7 @@ import {
   v2DocumentSchema,
   v3DocumentSchema,
   v4DocumentSchema,
+  v5DocumentSchema,
   legacyDocumentSchema,
   type AppDocument,
   type DeckConfig,
@@ -73,9 +74,15 @@ export function cloneProfiles(profiles: AppDocument["profiles"]) {
 }
 export function migrateDocument(value: unknown): AppDocument {
   const version = (value as { schemaVersion?: number })?.schemaVersion;
-  if (version === 5) return documentSchema.parse(value);
-  if (version === 4)
+  if (version === 6) return documentSchema.parse(value);
+  if (version === 5)
     return documentSchema.parse({
+      ...v5DocumentSchema.parse(value),
+      schemaVersion: 6,
+      schedules: [],
+    });
+  if (version === 4)
+    return migrateDocument({
       ...v4DocumentSchema.parse(value),
       schemaVersion: 5,
     });
