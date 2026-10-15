@@ -1,3 +1,10 @@
+import { DisplayState } from "../src/main/display-state";
+import { defaults, uid } from "../src/shared/defaults";
+import { captureOrigin } from "../src/shared/trigger-context";
+import { buttonAppearance } from "../src/shared/feedback";
+import { Images } from "../src/device/images";
+import { createHash } from "node:crypto";
+import sharp from "sharp";
 import { it, expect, afterEach, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { get as httpGet } from "node:http";
@@ -376,4 +383,93 @@ it("keeps multiple deck cookies separate and restores paired browsers after a se
   expect(messages[0]).toMatchObject({ view: { id: "tablet" } });
   expect(input).not.toHaveBeenCalled();
   ws.close();
+});
+
+it("authorizes resolved dynamic assets per deck and preserves desktop/web/frame composition parity", async () => {
+  const f = await fixture(),
+    document = defaults(),
+    deck = document.decks[0],
+    binding = document.profiles[0].pages[0].keys[0];
+  deck.id = "tablet";
+  const bytes = await sharp({
+      create: { width: 4, height: 4, channels: 3, background: "#123456" },
+    })
+      .png()
+      .toBuffer(),
+    hash = createHash("sha256").update(bytes).digest("hex");
+  await writeFile(join(f.directory, hash), bytes);
+  const display = new DisplayState(f.directory, f.directory, () => document),
+    launch = display.accept(
+      "button",
+      captureOrigin(document, deck.id, binding),
+    ),
+    runId = uid(),
+    actionId = uid();
+  display.begin(launch.authority!, runId);
+  display.action(launch.authority!, runId, actionId, true);
+  await display.commit(
+    { label: "Fetched 0", icon: "pack:lucide:v1:user", asset: hash },
+    { authority: launch.authority, runId, actionId },
+  );
+  const desktop = buttonAppearance(
+    binding,
+    { buttonDisplay: display.snapshot() },
+    document.settings.accent,
+    deck.id,
+  );
+  f.server.configure([
+    {
+      ...view(),
+      keys: {
+        0: {
+          label: desktop.label,
+          background: desktop.background,
+          icon: desktop.icon,
+          asset: desktop.asset,
+        },
+      },
+    },
+    view("other"),
+  ]);
+  const paired = await f.pair(),
+    other = await f.pair("other"),
+    connection = await connect(f.base, paired.cookie);
+  const payload = connection.messages[0] as { view: WebDeckView };
+  expect(payload.view.keys[0]).toMatchObject({
+    label: "Fetched 0",
+    asset: hash,
+  });
+  expect(JSON.stringify(connection.messages)).not.toMatch(
+    /authority|invocationId|buttonDisplay|outputs/,
+  );
+  expect(
+    (
+      await fetch(`${f.base}/key-assets/${hash}?deck=tablet`, {
+        headers: { Cookie: paired.cookie },
+      })
+    ).status,
+  ).toBe(200);
+  expect(
+    (
+      await fetch(`${f.base}/key-assets/${hash}?deck=other`, {
+        headers: { Cookie: other.cookie },
+      })
+    ).status,
+  ).toBe(403);
+  expect(
+    (
+      await fetch(`${f.base}/key-assets/${hash}?deck=tablet`, {
+        headers: { Cookie: other.cookie },
+      })
+    ).status,
+  ).toBe(403);
+  const images = new Images();
+  expect(
+    await images.render(
+      { ...binding.appearance, ...payload.view.keys[0] },
+      72,
+      bytes,
+    ),
+  ).toEqual(await images.render(desktop, 72, bytes));
+  connection.ws.close();
 });

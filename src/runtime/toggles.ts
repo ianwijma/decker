@@ -1,3 +1,4 @@
+import type { TrustedLaunch } from "../shared/trigger-context";
 import { observedToggle } from "../shared/toggle-observation";
 import { randomUUID } from "node:crypto";
 import type {
@@ -182,7 +183,12 @@ export class Toggles {
     e.state.blocked ||= blocked;
     e.state.fresh = false;
   }
-  private launch(e: Entry, target: Target, probe = false): RunHandle {
+  private launch(
+    e: Entry,
+    target: Target,
+    probe = false,
+    launch?: TrustedLaunch,
+  ): RunHandle {
     const workflow = structuredClone(targetWorkflow(target, e.document));
     if (probe && e.binding.toggle!.source.kind === "external")
       workflow.timeoutMs = Math.min(
@@ -197,6 +203,7 @@ export class Toggles {
         bindingId: e.binding.id,
         generation: e.binding.generation,
         deckId: e.state.deckId,
+        launch,
       },
       e.document.workflowAliases,
       { privateResult: probe },
@@ -292,6 +299,7 @@ export class Toggles {
   press(
     deckId: string,
     binding: Pick<KeyBinding, "id" | "generation">,
+    launch?: TrustedLaunch,
   ): Promise<boolean> {
     const e = this.entries.get(toggleKey(deckId, binding));
     if (
@@ -302,21 +310,28 @@ export class Toggles {
       !e.state.fresh ||
       e.state.confirmed === "unknown" ||
       this.stopped
-    )
+    ) {
+      this.engine.discardLaunch(launch);
       return Promise.resolve(false);
+    }
     e.busy = true;
     e.state.transitioning = true;
     e.state.error = undefined;
     const next = e.state.confirmed === "on" ? "off" : "on";
     this.publish();
-    return this.transition(e, next).finally(() => {
+    return this.transition(e, next, launch).finally(() => {
+      this.engine.discardLaunch(launch);
       e.busy = false;
       e.handle = undefined;
       e.state.transitioning = false;
       if (e.valid) this.publish();
     });
   }
-  private async transition(e: Entry, next: ConfirmedState): Promise<boolean> {
+  private async transition(
+    e: Entry,
+    next: ConfirmedState,
+    launch?: TrustedLaunch,
+  ): Promise<boolean> {
     const token = randomUUID();
     try {
       // Journal before effects: a crash or failed final commit is never replayed.
@@ -336,7 +351,8 @@ export class Toggles {
     if (!e.valid || this.stopped) return false;
     let result: ExecutionResult;
     try {
-      result = await this.launch(e, e.binding.toggle![next]).result;
+      result = await this.launch(e, e.binding.toggle![next], false, launch)
+        .result;
     } catch {
       result = { status: "failure" };
     }

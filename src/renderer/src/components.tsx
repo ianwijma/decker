@@ -1,3 +1,4 @@
+import { IconPicker } from "./IconPicker";
 import { expression } from "../../shared/data-contract";
 import { ObsConnectionDropdown } from "./ObsConnectionDropdown";
 import {
@@ -144,6 +145,8 @@ export function ActionFields({
                   value={value}
                   onChange={(v) => setValue(v)}
                 />
+              ) : field.type === "icon" ? (
+                <IconPicker value={String(value)} onSelect={setValue} />
               ) : field.type === "connection" ? (
                 <ObsConnectionDropdown
                   value={String(value)}
@@ -214,34 +217,75 @@ export function ActionFields({
         }
         return (
           <div key={field.key}>
-            {bindings ? (
-              <ExpressionEditor
-                label={field.label}
-                value={value}
-                defaultValue={field.default ?? ""}
-                destination={destinationType(action.type, field)}
-                choices={choices}
-                onChange={(v) => change(field, v)}
-                renderLiteral={literalEditor}
-              />
-            ) : bound ? (
-              <JsonEditor
-                label={`${field.label} binding`}
-                value={value}
-                onChange={(v) => change(field, v)}
-              />
-            ) : (
-              literalEditor(value, (v) => change(field, v))
+            {field.optional && (
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label={`Update ${field.label}`}
+                  checked={Object.hasOwn(action.config, field.key)}
+                  onChange={(e) => {
+                    const config = { ...action.config };
+                    if (e.target.checked)
+                      config[field.key] =
+                        field.key === "reset"
+                          ? []
+                          : field.key === "asset"
+                            ? null
+                            : (field.default ?? "");
+                    else delete config[field.key];
+                    onChange({ ...action, config });
+                  }}
+                />
+                Update {field.label}
+              </label>
             )}
-            {field.type === "file" && field.picker && (
-              <FilePickerButton
-                scope={scope}
-                action={action}
-                fieldKey={field.key}
-                picker={field.picker}
-                label={field.label}
-                onSelect={(path) => change(field, path)}
-              />
+            {(!field.optional || Object.hasOwn(action.config, field.key)) && (
+              <>
+                {bindings ? (
+                  <ExpressionEditor
+                    label={field.label}
+                    value={value}
+                    defaultValue={field.default ?? ""}
+                    destination={destinationType(action.type, field)}
+                    choices={choices}
+                    onChange={(v) => change(field, v)}
+                    renderLiteral={literalEditor}
+                  />
+                ) : bound ? (
+                  <JsonEditor
+                    label={`${field.label} binding`}
+                    value={value}
+                    onChange={(v) => change(field, v)}
+                  />
+                ) : (
+                  literalEditor(value, (v) => change(field, v))
+                )}
+                {field.type === "asset" && (
+                  <>
+                    <FilePickerButton
+                      scope={scope}
+                      action={action}
+                      fieldKey={field.key}
+                      picker="asset"
+                      label="local image"
+                      onSelect={(hash) => change(field, hash)}
+                    />
+                    <button type="button" onClick={() => change(field, null)}>
+                      Clear image
+                    </button>
+                  </>
+                )}
+                {field.type === "file" && field.picker && (
+                  <FilePickerButton
+                    scope={scope}
+                    action={action}
+                    fieldKey={field.key}
+                    picker={field.picker}
+                    label={field.label}
+                    onSelect={(path) => change(field, path)}
+                  />
+                )}
+              </>
             )}
           </div>
         );

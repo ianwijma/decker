@@ -110,6 +110,15 @@ export function DataPreview({
               )}
             </>
           )}
+          <strong>Trigger context</strong>
+          <pre>
+            {run.context
+              ? previewText(run.context).text
+              : "Context unavailable in this historical run."}
+          </pre>
+          {run.context?.origin === null && (
+            <p>No triggering button (unbound execution).</p>
+          )}
         </>
       )}
     </details>

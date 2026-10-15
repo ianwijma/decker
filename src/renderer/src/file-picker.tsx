@@ -36,7 +36,7 @@ export function FilePickerButton({
   scope: string;
   action: ActionInstance;
   fieldKey: string;
-  picker?: "openFile" | "saveFile";
+  picker?: "openFile" | "saveFile" | "asset";
   label: string;
   onSelect: (path: string) => void;
 }) {
@@ -63,10 +63,11 @@ export function FilePickerButton({
         const token = ++revision.current;
         setPending(true);
         try {
-          const path = await window.decker.request({
-            type: "pickFile",
-            picker,
-          });
+          const path = await window.decker.request(
+            picker === "asset"
+              ? { type: "asset" }
+              : { type: "pickFile", picker },
+          );
           if (revision.current === token && typeof path === "string")
             select.current(path);
         } catch (error) {

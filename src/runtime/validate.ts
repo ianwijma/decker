@@ -43,16 +43,48 @@ export function validateWorkflow(
     const availability = outputAvailability(g, outerAvailable);
     const refs = (value: Json, available: Set<string>, label: string) => {
       try {
-        inspectExpressions(value, ([root, key], hasFallback) => {
-          if (
-            root === "outputs" &&
-            (!key || !available.has(key)) &&
-            !hasFallback
-          )
-            errors.push(
-              `${label}: output ${key ?? "*"} is not available on every path; add a fallback`,
-            );
-        });
+        inspectExpressions(
+          value,
+          ([root, key, field, ...rest], hasFallback) => {
+            if (root === "context") {
+              const known =
+                ([
+                  "rootRunId",
+                  "invocationId",
+                  "rootWorkflowId",
+                  "workflowId",
+                  "workflowInvocationId",
+                ].includes(key) &&
+                  field === undefined) ||
+                (key === "source" &&
+                  (field === undefined || field === "kind")) ||
+                (key === "origin" &&
+                  (field === undefined ||
+                    [
+                      "deckId",
+                      "profileId",
+                      "pageId",
+                      "bindingId",
+                      "generation",
+                    ].includes(field))) ||
+                key === undefined;
+              if (!known || rest.length)
+                errors.push(`${label}: unknown trigger context field`);
+              if (key === "origin" && field !== undefined && !hasFallback)
+                errors.push(
+                  `${label}: triggering button may be unavailable; add a fallback`,
+                );
+            }
+            if (
+              root === "outputs" &&
+              (!key || !available.has(key)) &&
+              !hasFallback
+            )
+              errors.push(
+                `${label}: output ${key ?? "*"} is not available on every path; add a fallback`,
+              );
+          },
+        );
       } catch (error) {
         errors.push(
           `${label}: ${error instanceof Error ? error.message : String(error)}`,

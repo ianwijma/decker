@@ -112,7 +112,7 @@ export function buttonAppearance(
   toggles: ToggleState[] = [],
 ): ButtonAppearance {
   const toggle = selectToggle(toggles, binding, deckId);
-  const appearance: ButtonAppearance = binding.toggle
+  let appearance: ButtonAppearance = binding.toggle
     ? stateAppearance(
         binding.appearance,
         toggle && toggle.confirmed !== "unknown"
@@ -123,6 +123,12 @@ export function buttonAppearance(
   const display = toggleDisplay(binding, toggle);
   if (display)
     appearance.stateLabel = `${display.confirmed}${toggle?.transitioning ? " · transitioning" : toggle?.reconciling ? " · reconciling" : toggle?.blocked ? " · blocked" : !toggle?.fresh ? " · stale" : toggle?.error ? " · failed" : ""}`;
+  const dynamic = observed.buttonDisplay as
+    Record<string, import("./schema").StateAppearance> | undefined;
+  appearance = {
+    ...stateAppearance(appearance, dynamic?.[activityKey(deckId, binding)]),
+    stateLabel: appearance.stateLabel,
+  };
   const feedback = observed.buttonFeedback as
     Record<string, Record<string, Json>> | undefined;
   const state = feedback?.[activityKey(deckId, binding)];
@@ -136,4 +142,26 @@ export function buttonAppearance(
   else if (state?.status === "failure")
     appearance.background = appearance.error;
   return appearance;
+}
+
+/** Compatibility projection for label/background consumers of buttonFeedback.
+ * Persistent fields are read from the display service, never owned by activity.
+ */
+export function legacyDisplayFeedback(
+  activity: Record<string, Json>,
+  display: Record<string, Json>,
+): Record<string, Json> {
+  const result = structuredClone(activity);
+  for (const [key, value] of Object.entries(display)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const fields: Record<string, Json> = {};
+    for (const field of ["label", "background"] as const)
+      if (typeof value[field] === "string") fields[field] = value[field];
+    if (Object.keys(fields).length)
+      result[key] = {
+        ...(result[key] as Record<string, Json> | undefined),
+        ...fields,
+      };
+  }
+  return result;
 }

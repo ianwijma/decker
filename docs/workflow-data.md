@@ -156,3 +156,8 @@ or document migration.
 The regressions use local HTTP fixtures, mocked notifications and a virtual
 Electron display. Physical Stream Deck and real desktop notification acceptance
 remain pending for the coordinator's consolidated host session.
+
+PR21 adds the read-only `context` namespace and workflow-only **Update triggering
+button** action without changing the expression grammar or workspace schema.
+See [Trigger context and dynamic display](trigger-context-display.md) for origin,
+invocation/authority, clearing, cache and later scheduling/refresh contracts.

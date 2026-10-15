@@ -329,3 +329,8 @@ Live polls reuse pending provider reads; deliberate fresh reads supersede older
 samples. Existing live events and polls
 continue unchanged and add no timer. OBS query responses are guarded against
 newer field observations, connection replacement and stale binding definitions.
+
+PR21 implements stage 3 with a separate last-good cache and trusted invocation
+lifecycle. It preserves the shared composition order, state marker and artwork
+identity rules above. See [Trigger context and dynamic display](trigger-context-display.md)
+for the launch-source, display authority and local-asset retention seams.

@@ -232,6 +232,30 @@ export function bindingChoices(
     conditional: false,
     hint: "Declared input; resolved type is checked before execution.",
   }));
+  for (const [key, type] of Object.entries({
+    "source.kind": "text",
+    origin: "JSON",
+    "origin.deckId": "text",
+    "origin.profileId": "text",
+    "origin.pageId": "text",
+    "origin.bindingId": "text",
+    "origin.generation": "number",
+    rootRunId: "text",
+    invocationId: "text",
+    rootWorkflowId: "text",
+    workflowId: "text",
+    workflowInvocationId: "text",
+  } as Record<string, DataType>))
+    choices.push({
+      path: ["context", ...key.split(".")],
+      name: key,
+      group: "Trigger context",
+      type,
+      conditional: key.startsWith("origin."),
+      hint: key.startsWith("origin")
+        ? "Read-only saved origin; unavailable for manual, detached test, scheduled or private probe runs."
+        : "Immutable runtime metadata, independent of caller inputs and variables.",
+    });
   for (const p of producers) {
     const { type, fields } = nodeOutput(p.node, workflow, all, aliases);
     choices.push({

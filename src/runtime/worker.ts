@@ -1,3 +1,4 @@
+import { launchSourceSchema, originBinding } from "../shared/trigger-context";
 import { toggleBindings } from "../shared/toggle-contract";
 import { targetWorkflow, toggleDefinitionStamp } from "./targets";
 import { Toggles } from "./toggles";
@@ -33,17 +34,31 @@ const main = async (
   new Promise<Json>((resolve, reject) => {
     context.signal.throwIfAborted();
     const id = uid();
+    const lifecycle = (active: boolean) => {
+      if (context.authority && context.actionId)
+        send({
+          type: "displayAction",
+          authority: context.authority,
+          runId: context.runId,
+          actionId: context.actionId,
+          active,
+        });
+    };
+    lifecycle(true);
     const abort = () => {
+      lifecycle(false);
       replies.delete(id);
       reject(new Error("Action cancelled"));
     };
     context.signal.addEventListener("abort", abort, { once: true });
     replies.set(id, {
       resolve: (v) => {
+        lifecycle(false);
         context.signal.removeEventListener("abort", abort);
         resolve(v);
       },
       reject: (e) => {
+        lifecycle(false);
         context.signal.removeEventListener("abort", abort);
         reject(e);
       },
@@ -55,6 +70,8 @@ const main = async (
       config,
       context: {
         runId: context.runId,
+        authority: context.authority,
+        actionId: context.actionId,
         bindingId: context.bindingId,
         generation: context.generation,
         deckId: context.deckId,
@@ -102,6 +119,11 @@ const engine = new Engine(
   },
   () => Object.values(credentials),
   () => document.workflowAliases,
+  (event) =>
+    send({ ...event, type: "displayInvocation", operation: event.type }),
+  (launch) =>
+    !launch.source.origin ||
+    Boolean(originBinding(document, launch.source.origin)),
 );
 const coordinator = new Coordinator(engine);
 const storageReplies = new Map<
@@ -234,6 +256,9 @@ const schema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("trigger"),
+    launch: z
+      .object({ source: launchSourceSchema, authority: z.string().optional() })
+      .optional(),
     binding: bindingSchema,
     target: targetSchema.optional(),
     deckId: z.string(),
@@ -241,6 +266,9 @@ const schema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("run"),
+    launch: z
+      .object({ source: launchSourceSchema, authority: z.string().optional() })
+      .optional(),
     workflowId: z.string(),
     inputs: z.record(z.string(), z.unknown()),
     deckId: z.string().optional(),
@@ -323,11 +351,16 @@ port.on("message", async (event) => {
         break;
       }
       case "trigger": {
+        if (
+          message.launch?.source.origin &&
+          !originBinding(document, message.launch.source.origin)
+        )
+          throw new Error("Triggering button changed");
         if (engine.activeCount >= 64)
           throw new Error("Maximum active runs reached (64)");
         if (message.binding.toggle) {
           if (!message.phase || message.phase === "press")
-            void toggles.press(message.deckId, message.binding);
+            void toggles.press(message.deckId, message.binding, message.launch);
           break;
         }
         if (!message.target) throw new Error("Target missing");
@@ -338,6 +371,7 @@ port.on("message", async (event) => {
           [...document.workflows, ...(f.id === "direct" ? [f] : [])],
           message.deckId,
           message.phase,
+          message.launch,
         );
         break;
       }
@@ -354,7 +388,7 @@ port.on("message", async (event) => {
           f,
           document.workflows,
           message.inputs as Record<string, Json>,
-          message.deckId ? { deckId: message.deckId } : undefined,
+          { deckId: message.deckId, launch: message.launch },
         );
         standalone.set(h.record.id, h);
         void h.done.finally(() => standalone.delete(h.record.id));
