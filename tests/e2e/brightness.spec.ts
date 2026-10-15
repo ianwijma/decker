@@ -129,7 +129,7 @@ test("button/workflow palettes, search, drag assignment and advanced phase/seque
     await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
   for (const name of [
     "Set brightness",
-    "Change key appearance",
+    "Update triggering button",
     "Media control",
   ])
     await expect(page.getByRole("button", { name, exact: true })).toHaveCount(
@@ -230,7 +230,7 @@ test("button/workflow palettes, search, drag assignment and advanced phase/seque
   await page.getByRole("button", { name: "Flows", exact: true }).click();
   for (const name of [
     "Set brightness",
-    "Change key appearance",
+    "Update triggering button",
     "Increase brightness",
     "Decrease brightness",
     "Play/Pause",

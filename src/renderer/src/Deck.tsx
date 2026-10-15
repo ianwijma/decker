@@ -269,10 +269,14 @@ export function Deck() {
                   style={{ backgroundColor: b?.appearance.background }}
                   onClick={() => setSelected(index)}
                   onDoubleClick={() =>
-                    b &&
+                    original &&
                     (!toggle ||
                       (!toggle.disabled && !useApp.getState().saving)) &&
-                    void request({ type: "test", deckId: deck.id, binding: b })
+                    void request({
+                      type: "test",
+                      deckId: deck.id,
+                      binding: original,
+                    })
                   }
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {

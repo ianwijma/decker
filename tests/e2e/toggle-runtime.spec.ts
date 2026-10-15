@@ -418,15 +418,17 @@ test("detached drafts do not execute and re-adding a deleted toggle allocates a 
   await expect.poll(() => state()).toMatchObject({ fresh: true });
   const detached = structuredClone(b);
   detached.id = uid();
-  await page.evaluate(
-    (raw) =>
-      window.decker.request({
-        type: "test",
-        deckId: "simulator-xl",
-        binding: JSON.parse(raw),
-      }),
-    JSON.stringify(detached),
-  );
+  await expect(
+    page.evaluate(
+      (raw) =>
+        window.decker.request({
+          type: "test",
+          deckId: "simulator-xl",
+          binding: JSON.parse(raw),
+        }),
+      JSON.stringify(detached),
+    ),
+  ).rejects.toThrow("Save the toggle before testing it");
   await expect(readFile(marker)).rejects.toThrow(/ENOENT/);
   const newId = await page.evaluate(async (raw) => {
     const old = JSON.parse(raw),

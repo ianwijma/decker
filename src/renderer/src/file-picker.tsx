@@ -36,10 +36,11 @@ export function FilePickerButton({
   scope: string;
   action: ActionInstance;
   fieldKey: string;
-  picker?: "openFile" | "saveFile";
+  picker?: "openFile" | "saveFile" | "asset";
   label: string;
   onSelect: (path: string) => void;
 }) {
+  const saving = useApp((state) => state.saving);
   const [pending, setPending] = useState(false),
     revision = useRef(0),
     select = useRef(onSelect);
@@ -58,15 +59,16 @@ export function FilePickerButton({
     <button
       type="button"
       aria-label={`Choose ${label}`}
-      disabled={pending}
+      disabled={pending || (picker === "asset" && saving)}
       onClick={async () => {
         const token = ++revision.current;
         setPending(true);
         try {
-          const path = await window.decker.request({
-            type: "pickFile",
-            picker,
-          });
+          const path = await window.decker.request(
+            picker === "asset"
+              ? { type: "asset" }
+              : { type: "pickFile", picker },
+          );
           if (revision.current === token && typeof path === "string")
             select.current(path);
         } catch (error) {

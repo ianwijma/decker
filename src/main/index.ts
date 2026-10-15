@@ -1,3 +1,5 @@
+import { DisplayState, displayObserved } from "./display-state";
+import { captureOrigin, originBinding } from "../shared/trigger-context";
 import {
   app,
   BrowserWindow,
@@ -61,7 +63,7 @@ import {
 import { Triggers } from "../device/triggers";
 import { bindingExecutionIdentity } from "../shared/toggle-identity";
 import { selectToggle, toggleDisplay } from "../shared/toggle-presentation";
-import { buttonAppearance } from "../shared/feedback";
+import { buttonAppearance, legacyDisplayFeedback } from "../shared/feedback";
 import { ButtonActivity } from "../runtime/activity";
 import { redact } from "../runtime/data";
 import {
@@ -85,7 +87,8 @@ let window: BrowserWindow | undefined,
   quitting = false,
   store: Persistence,
   credentials: Credentials,
-  toggleStorage: ToggleStorage;
+  toggleStorage: ToggleStorage,
+  displayState: DisplayState;
 let toggleStates: ToggleState[] = [];
 let document: AppDocument = defaults(),
   runs: RunRecord[] = [],
@@ -116,13 +119,13 @@ let publishTimer: ReturnType<typeof setTimeout> | undefined,
   persistTimer: ReturnType<typeof setTimeout> | undefined;
 let credentialEpoch = uid();
 const snapshot = (): Snapshot => {
-  const secrets = Object.values(credentials?.all() ?? {});
-  const safeObserved = Object.fromEntries(
-    Object.entries({
-      ...observed,
-      buttonFeedback: feedback.snapshot(),
-      diagnostics: diagnosticFaults.snapshot(),
-    }).map(([key, value]) => [key, redactDiagnostics(value, secrets)]),
+  const secrets = Object.values(credentials?.all() ?? {}),
+    display = displayState?.snapshot() ?? {};
+  const safeObserved = displayObserved(
+    { ...observed, diagnostics: diagnosticFaults.snapshot() },
+    feedback.snapshot(),
+    display,
+    secrets,
   );
   const safeDevices = devices.map(
     (device) => redactDiagnostics(device, secrets) as typeof device,
@@ -237,13 +240,19 @@ function page(deckId: string) {
 function deckAppearance(deckId: string) {
   const deck = document.decks.find((d) => d.id === deckId)!;
   const keys: Record<string, import("../shared/schema").WebKey> = {};
-  const source = page(deckId);
+  const source = page(deckId),
+    display = displayState?.snapshot() ?? {},
+    activity = legacyDisplayFeedback(feedback.snapshot(), display);
   for (let i = 0; i < deck.rows * deck.columns; i++) {
     const binding = source.keys[keySlot(i, deck.columns)];
     if (!binding) continue;
     const appearance = buttonAppearance(
       binding,
-      { ...observed, buttonFeedback: feedback.snapshot() },
+      {
+        ...observed,
+        buttonFeedback: activity,
+        buttonDisplay: display,
+      },
       document.settings.accent,
       deckId,
       toggleStates,
@@ -365,6 +374,7 @@ function configureDevice() {
 }
 function configure(activateToggles = false) {
   feedback.reconcile(document);
+  displayState?.reconcile();
   for (const key of Object.keys(observed))
     if (
       key.startsWith("obs:") &&
@@ -380,14 +390,26 @@ function configure(activateToggles = false) {
   configureDevice();
   publish();
 }
-const triggers = new Triggers((binding, target, deckId, phase) => {
-  try {
-    post("runner", { type: "trigger", binding, target, deckId, phase });
-    diagnosticFaults.clear("trigger");
-  } catch (error) {
-    diagnostic(error, "trigger", "Key actions");
-  }
-});
+const triggers = new Triggers(
+  (binding, target, deckId, phase, origin) => {
+    try {
+      if (!origin) throw new Error("Triggering button changed");
+      const launch = displayState.accept("button", origin);
+      post("runner", {
+        type: "trigger",
+        binding,
+        target,
+        deckId,
+        phase,
+        launch,
+      });
+      diagnosticFaults.clear("trigger");
+    } catch (error) {
+      diagnostic(error, "trigger", "Key actions");
+    }
+  },
+  (binding, deckId) => captureOrigin(document, deckId, binding),
+);
 function navigate(deckId: string, profileId: string, pageId: string) {
   navigateDeck(document, deckId, profileId, pageId);
   configure();
@@ -401,11 +423,13 @@ async function mainAction(
     "deck.profile",
     "deck.back",
     ...brightnessActions,
+    "deck.appearance",
   ].includes(args[0])
     ? enqueueMutation(async () => {
         // A run can cancel while a credential/document commit holds this queue.
         // Never apply its delayed navigation or brightness after it has settled.
         if (
+          args[0] !== "deck.appearance" &&
           !runs.some(
             (run) => run.id === args[2].runId && run.status === "running",
           )
@@ -420,6 +444,8 @@ async function performMainAction(
   c: Record<string, Json>,
   context: {
     runId: string;
+    authority?: string;
+    actionId?: string;
     bindingId?: string;
     generation?: number;
     deckId?: string;
@@ -474,25 +500,12 @@ async function performMainAction(
       return committed.value;
     }
     case "deck.appearance": {
-      const binding = Object.values(page(deck!.id).keys).find(
-        (b) =>
-          b.id === context.bindingId && b.generation === context.generation,
-      );
-      if (binding) {
-        const background = z
-          .string()
-          .regex(/^#[a-fA-F0-9]{6}$/)
-          .parse(c.background);
-        feedback.override(
-          deck!.id,
-          binding,
-          String(c.label).slice(0, 80),
-          background,
-        );
-        configureDevice();
-      }
+      await displayState.commit(c, context);
+      configureDevice();
+      publish();
       return null;
     }
+
     default:
       throw new Error(`Unknown main action: ${action}`);
   }
@@ -580,7 +593,18 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
           diagnostic(message.error, `worker:${name}`, `${name} service`);
         return;
       }
-      if (message.type === "toggleStorage") {
+      if (message.type === "displayInvocation") {
+        if (message.operation === "begin")
+          displayState.begin(message.authority, message.runId);
+        else displayState.end(message.authority);
+      } else if (message.type === "displayAction") {
+        displayState.action(
+          message.authority,
+          message.runId,
+          message.actionId,
+          message.active,
+        );
+      } else if (message.type === "toggleStorage") {
         const request = toggleStorageRequestSchema.parse(message.request);
         try {
           const value = await enqueueMutation(() =>
@@ -690,6 +714,7 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         errorDetails: undefined,
       }));
     } else if (name === "runner") {
+      displayState.invalidate();
       toggleStates = toggleStates.map((state) => ({
         ...state,
         transitioning: false,
@@ -863,10 +888,17 @@ async function handleRequest(request: Request) {
     case "test": {
       const deck = document.decks.find((d) => d.id === request.deckId);
       if (!deck) throw new Error("Deck not found");
+      const origin = captureOrigin(document, deck.id, request.binding),
+        saved = origin ? originBinding(document, origin) : undefined,
+        bound =
+          saved && JSON.stringify(saved) === JSON.stringify(request.binding);
+      if (request.binding.toggle && !bound)
+        throw new Error("Save the toggle before testing it");
       if (request.binding.toggle || request.binding.press)
         post("runner", {
           type: "trigger",
           binding: request.binding,
+          launch: displayState.accept("test", bound ? origin : undefined),
           target: request.binding.press,
           deckId: deck.id,
         });
@@ -875,6 +907,7 @@ async function handleRequest(request: Request) {
     case "run":
       post("runner", {
         ...request,
+        launch: displayState.accept("manual"),
         deckId: request.deckId ?? (document.activeDeckId || undefined),
       });
       return null;
@@ -904,6 +937,7 @@ async function handleRequest(request: Request) {
       return null;
     }
     case "cancel":
+      displayState.cancelRun(request.runId);
       post("runner", { type: "cancel", id: request.runId });
       return null;
     case "navigate":
@@ -1166,6 +1200,7 @@ async function handleRequest(request: Request) {
       );
       await store.importAssets(imported.assets ?? {});
       triggers.disconnect();
+      displayState.invalidate();
       for (const r of runs.filter((r) => r.status === "running"))
         post("runner", { type: "cancel", id: r.id });
 
@@ -1244,6 +1279,14 @@ if (locked)
     runs = loaded.runs;
     toggleStorage = new ToggleStorage(app.getPath("userData"));
     await toggleStorage.load();
+    displayState = new DisplayState(
+      app.getPath("userData"),
+      store.assetDirectory,
+      () => document,
+      undefined,
+      () => Object.values(credentials?.all() ?? {}),
+    );
+    await displayState.load();
     credentials = new Credentials(app.getPath("userData"));
     await credentials.load();
     if (loaded.warning)
@@ -1314,6 +1357,7 @@ app.on("before-quit", (event) => {
   quitting = true;
   obsTests.close();
   triggers.disconnect();
+  displayState?.invalidate();
   for (const name of workers.keys()) post(name, { type: "stop" });
   clearTimeout(persistTimer);
   setTimeout(() => {

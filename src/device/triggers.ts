@@ -1,5 +1,7 @@
+import type { ButtonOrigin } from "../shared/trigger-context";
 import type { KeyBinding, Target } from "../shared/schema";
 type Held = {
+  origin?: ButtonOrigin;
   binding: KeyBinding;
   deckId: string;
   long: boolean;
@@ -13,31 +15,39 @@ export class Triggers {
       target: Target | undefined,
       deckId: string,
       phase: "press" | "release" | "longPress",
+      origin?: ButtonOrigin,
     ) => void,
+    private capture?: (
+      binding: KeyBinding,
+      deckId: string,
+    ) => ButtonOrigin | undefined,
   ) {}
+  private emit(
+    held: Held,
+    target: Target | undefined,
+    phase: "press" | "release" | "longPress",
+  ) {
+    if (this.capture)
+      this.fire(held.binding, target, held.deckId, phase, held.origin);
+    else this.fire(held.binding, target, held.deckId, phase);
+  }
   down(device: string, key: number, binding?: KeyBinding, deckId = device) {
     const id = `${device}:${key}`;
     if (this.held.has(id) || !binding) return;
     const held: Held = {
       binding: structuredClone(binding),
+      origin: this.capture?.(binding, deckId),
       long: false,
       deckId,
     };
     this.held.set(id, held);
-    if (binding.toggle)
-      this.fire(held.binding, undefined, held.deckId, "press");
+    if (binding.toggle) this.emit(held, undefined, "press");
     else if (binding.longPress)
       held.timer = setTimeout(() => {
         held.long = true;
-        this.fire(
-          held.binding,
-          held.binding.longPress!,
-          held.deckId,
-          "longPress",
-        );
+        this.emit(held, held.binding.longPress!, "longPress");
       }, binding.longPressMs);
-    else if (binding.press)
-      this.fire(held.binding, binding.press, held.deckId, "press");
+    else if (binding.press) this.emit(held, binding.press, "press");
   }
   up(device: string, key: number) {
     const id = `${device}:${key}`,
@@ -47,9 +57,8 @@ export class Triggers {
     this.held.delete(id);
     if (held.binding.toggle) return;
     if (held.binding.longPress && !held.long && held.binding.press)
-      this.fire(held.binding, held.binding.press, held.deckId, "press");
-    if (held.binding.release)
-      this.fire(held.binding, held.binding.release, held.deckId, "release");
+      this.emit(held, held.binding.press, "press");
+    if (held.binding.release) this.emit(held, held.binding.release, "release");
   }
   disconnectDeck(deckId: string) {
     for (const [id, held] of this.held)

@@ -260,7 +260,7 @@ describe("scope and presentation contract", () => {
     expect(
       bindingChoices(parent, [], consumer.id, [child], {
         "legacy-child": "child",
-      }).some((x) => x.path.length > 2),
+      }).some((x) => x.path[0] === "outputs" && x.path.length > 2),
     ).toBe(false);
     expect(acceptsType("text or HTTP result", "number")).toBe(false);
     expect(acceptsType("text or HTTP result", "HTTP result")).toBe(true);

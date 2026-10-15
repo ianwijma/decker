@@ -1,4 +1,8 @@
 import {
+  executionContextSchema,
+  type ExecutionContext,
+} from "./trigger-context";
+import {
   obsTestRequestSchema,
   obsSaveRequestSchema,
   obsCancelRequestSchema,
@@ -438,6 +442,7 @@ export type NodeExecutionRecord = {
   attempt: number;
 };
 export type RunRecord = {
+  context?: ExecutionContext;
   id: string;
   workflowId: string;
   workflowName: string;
@@ -619,6 +624,7 @@ export interface DeckerAPI {
 }
 
 export const runRecordSchema: z.ZodType<RunRecord> = z.object({
+  context: executionContextSchema.optional(),
   id,
   workflowId: id,
   workflowName: z.string(),

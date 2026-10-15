@@ -1,4 +1,9 @@
 import {
+  launchSourceSchema,
+  type ExecutionContext,
+  type TrustedLaunch,
+} from "../shared/trigger-context";
+import {
   findWorkflow,
   resolveWorkflowId,
   type WorkflowAliases,
@@ -21,7 +26,21 @@ import { checkCondition, redact, resolve, type Scope } from "./data";
 import { withCancellation } from "./cancellation";
 import { Invocations, queuedWorkflows } from "./invocations";
 import { validateWorkflow } from "./validate";
+export type RunBinding = {
+  bindingId?: string;
+  generation?: number;
+  deckId?: string;
+  launch?: TrustedLaunch;
+};
+export type InvocationEvent = {
+  type: "begin" | "end";
+  runId: string;
+  authority: string;
+};
 export type ActionContext = {
+  execution?: ExecutionContext;
+  authority?: string;
+  actionId?: string;
   signal: AbortSignal;
   runId: string;
   bindingId?: string;
@@ -55,20 +74,30 @@ export class Engine {
   cancelRun(id: string) {
     this.active.get(id)?.cancel();
   }
+  discardLaunch(launch?: TrustedLaunch) {
+    if (launch?.authority)
+      this.lifecycle({
+        type: "end",
+        runId: launch.source.invocationId,
+        authority: launch.authority,
+      });
+  }
   prepare(
     definition: WorkflowDefinition,
     definitions: WorkflowDefinition[],
-    binding: { bindingId?: string; generation?: number; deckId?: string },
+    binding: RunBinding,
   ) {
     const workflow = structuredClone(definition),
       all = structuredClone(definitions),
       aliases = structuredClone(this.workflowAliases());
+    binding = structuredClone(binding);
     const issues = validateWorkflow(workflow, all, aliases);
     if (issues.length) throw new Error(issues.join("\n"));
     for (const input of workflow.inputs)
       throw new Error(`Missing workflow input: ${input}`);
     return {
       matchesWorkflow: queuedWorkflows(workflow, all, aliases),
+      discard: () => this.discardLaunch(binding.launch),
       launch: () => this.start(workflow, all, {}, binding, aliases),
     };
   }
@@ -77,15 +106,19 @@ export class Engine {
     private emit: (record: RunRecord) => void,
     private secrets: () => string[] = () => [],
     private workflowAliases: () => WorkflowAliases = () => ({}),
+    private lifecycle: (event: InvocationEvent) => void = () => {},
+    private validLaunch: (launch: TrustedLaunch) => boolean = () => true,
   ) {}
   start(
     definition: WorkflowDefinition,
     definitions: WorkflowDefinition[],
     inputs: Record<string, Json> = {},
-    binding?: { bindingId?: string; generation?: number; deckId?: string },
+    binding?: RunBinding,
     aliasesSnapshot = this.workflowAliases(),
     options: { privateResult?: boolean } = {},
   ): RunHandle {
+    if (binding?.launch && !this.validLaunch(binding.launch))
+      throw new Error("Triggering button changed before launch");
     if (this.active.size >= 64)
       throw new Error("Maximum active runs reached (64)");
     const workflow = structuredClone(definition),
@@ -107,11 +140,41 @@ export class Engine {
       workflowId: workflow.id,
       workflowName: workflow.name,
       revision: workflow.revision,
-      ...binding,
+      bindingId: binding?.bindingId,
+      generation: binding?.generation,
+      deckId: binding?.deckId,
       startedAt: Date.now(),
       status: "running",
       nodes: [],
     };
+    const source = launchSourceSchema.parse(
+      options.privateResult
+        ? { kind: "probe", invocationId: randomUUID() }
+        : (binding?.launch?.source ?? {
+            kind: "manual",
+            invocationId: randomUUID(),
+          }),
+    );
+    const authority = options.privateResult
+      ? undefined
+      : binding?.launch?.authority;
+    const rootContext: ExecutionContext = {
+      source: { kind: source.kind },
+      origin: source.origin ?? null,
+      rootRunId: record.id,
+      invocationId: source.invocationId,
+      rootWorkflowId: workflow.id,
+      workflowId: workflow.id,
+      workflowInvocationId: randomUUID(),
+    };
+    record.context = structuredClone(rootContext);
+    const end = () => {
+      if (authority)
+        this.lifecycle({ type: "end", runId: record.id, authority });
+    };
+    if (authority)
+      this.lifecycle({ type: "begin", runId: record.id, authority });
+    signal.addEventListener("abort", end, { once: true });
     this.active.set(record.id, { invocations, cancel });
     const publish = () => {
       while (record.nodes.length > 1 && JSON.stringify(record).length > 256000)
@@ -127,6 +190,17 @@ export class Engine {
       parentSignal: AbortSignal,
       path: string,
     ): Promise<Json> => {
+      if (scope.context) {
+        Object.freeze(scope.context.source);
+        if (scope.context.origin) Object.freeze(scope.context.origin);
+        Object.freeze(scope.context);
+        Object.defineProperty(scope, "context", {
+          value: scope.context,
+          writable: false,
+          configurable: false,
+          enumerable: true,
+        });
+      }
       let current: string | undefined = g.entry,
         last: Json = null;
       while (current) {
@@ -183,7 +257,16 @@ export class Engine {
               try {
                 const result = await runGraph(
                   f.graph,
-                  { inputs: childInputs, outputs: {}, vars: {} },
+                  {
+                    inputs: childInputs,
+                    outputs: {},
+                    vars: {},
+                    context: {
+                      ...scope.context!,
+                      workflowId: f.id,
+                      workflowInvocationId: randomUUID(),
+                    },
+                  },
                   AbortSignal.any([
                     nodeSignal,
                     AbortSignal.timeout(f.timeoutMs),
@@ -248,8 +331,13 @@ export class Engine {
                         this.handler(action, {
                           signal: nodeSignal,
                           runId: record.id,
-                          ...binding,
-                          workflowId: workflow.id,
+                          bindingId: binding?.bindingId,
+                          generation: binding?.generation,
+                          deckId: binding?.deckId,
+                          execution: scope.context,
+                          authority,
+                          actionId: randomUUID(),
+                          workflowId: scope.context!.workflowId,
                         }),
                         nodeSignal,
                       );
@@ -459,7 +547,12 @@ export class Engine {
         fromPromise(async () => {
           const result = await runGraph(
             workflow.graph,
-            { inputs: structuredClone(inputs), outputs: {}, vars: {} },
+            {
+              inputs: structuredClone(inputs),
+              outputs: {},
+              vars: {},
+              context: rootContext,
+            },
             signal,
             workflow.id,
           );
@@ -482,6 +575,8 @@ export class Engine {
               ? { status: deadline.aborted || timedOut ? "timeout" : "failure" }
               : { status: "success", output: boundedResult(output) },
         );
+        end();
+        signal.removeEventListener("abort", end);
         leaveRoot();
         this.active.delete(record.id);
         record.endedAt = Date.now();

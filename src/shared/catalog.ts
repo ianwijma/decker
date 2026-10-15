@@ -1,3 +1,4 @@
+import { displayActionSchema } from "./display-contract";
 import { z } from "zod";
 import { decodeArgs } from "./data-contract";
 import {
@@ -35,7 +36,10 @@ export type Field = {
     | "profile"
     | "page"
     | "file"
-    | "json";
+    | "json"
+    | "icon"
+    | "asset";
+  optional?: boolean;
   /** For a file field, offer the desktop-only native selector beside manual entry. */
   picker?: "openFile" | "saveFile";
   multiline?: boolean;
@@ -420,14 +424,22 @@ const definitions: Omit<
   {
     id: "deck.appearance",
     paletteContexts: ["workflow"],
-    name: "Change key appearance",
+    name: "Update triggering button",
     group: "Deck",
     icon: "✦",
-    description: "Change the triggering key label and background.",
+    description:
+      "Update the saved triggering key. Omitted fields inherit; reset releases overrides. Manual runs have no triggering key.",
     capabilities: [],
     fields: [
-      f("label", "Label", "Ready"),
-      f("background", "Background", "#23a559"),
+      { ...f("label", "Label", "Ready"), optional: true },
+      { ...f("background", "Background", "#23a559"), optional: true },
+      { ...f("icon", "Icon", "", "icon"), optional: true },
+      { ...f("asset", "Local image", "", "asset"), optional: true },
+      {
+        ...f("reset", "Reset fields", "[]", "json"),
+        optional: true,
+        hint: 'Release overrides with ["label","background","icon","asset"]. Empty label/icon clears; image null clears.',
+      },
     ],
     idempotent: true,
   },
@@ -496,6 +508,7 @@ export const catalog: ActionDefinition[] = definitions.map((d) => {
               ]),
             ),
           );
+  if (d.id === "deck.appearance") schema = displayActionSchema;
   if (d.id === "file.readText") schema = readTextFileSchema;
   if (d.id === "file.writeText" || d.id === "file.appendText")
     schema = mutateTextFileSchema;
@@ -541,6 +554,8 @@ export const makeAction = (type: string): ActionInstance => ({
   type,
   version: 1,
   config: Object.fromEntries(
-    actionById(type)!.fields.map((field) => [field.key, field.default ?? ""]),
+    actionById(type)!
+      .fields.filter((f) => !f.optional || f.key === "label")
+      .map((field) => [field.key, field.default ?? ""]),
   ),
 });

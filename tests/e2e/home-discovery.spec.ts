@@ -61,6 +61,7 @@ async function baseFixture() {
   return snapshot;
 }
 type FixtureContext = {
+  homeSend?: (channel: string, ...args: unknown[]) => void;
   homeSnapshot: Snapshot;
   homeRequests: Request[];
   emitHome: (json: string) => void;
@@ -71,7 +72,8 @@ async function installFixture(snapshot: Snapshot) {
   await app.evaluate(({ BrowserWindow, ipcMain }, json) => {
     const context = globalThis as unknown as FixtureContext;
     const contents = BrowserWindow.getAllWindows()[0].webContents;
-    const send = contents.send.bind(contents);
+    const send = context.homeSend ?? contents.send.bind(contents);
+    context.homeSend = send;
     contents.send = (channel, ...args) => {
       if (channel !== "decker:snapshot") send(channel, ...args);
     };
@@ -160,9 +162,16 @@ const homeButton = () =>
 
 test("a delayed startup snapshot cannot overwrite a newer live overview", async () => {
   const stale = await baseFixture();
-  await app.evaluate(({ ipcMain }, json) => {
-    const context = globalThis as unknown as {
+  await app.evaluate(({ ipcMain, BrowserWindow }, json) => {
+    const context = globalThis as unknown as FixtureContext & {
       initialReplies: (() => void)[];
+    };
+    // Quiesce real publications before reloading, so only the deliberate newer
+    // event and delayed stale reply participate in the startup ordering test.
+    const contents = BrowserWindow.getAllWindows()[0].webContents;
+    context.homeSend = contents.send.bind(contents);
+    contents.send = (channel, ...args) => {
+      if (channel !== "decker:snapshot") context.homeSend!(channel, ...args);
     };
     context.initialReplies = [];
     ipcMain.removeHandler("decker:snapshot");

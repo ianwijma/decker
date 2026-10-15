@@ -617,6 +617,11 @@ export const Flows = memo(function Flows() {
                     />
                     <ActionFields
                       action={current.action}
+                      ownerScope={JSON.stringify([
+                        workflow.id,
+                        path,
+                        current.id,
+                      ])}
                       onChange={(action) =>
                         updateNode((n) => {
                           n.action = action;

@@ -1,5 +1,6 @@
 import type { Json } from "../shared/schema";
 export type Scope = {
+  readonly context?: import("../shared/trigger-context").ExecutionContext;
   inputs: Record<string, Json>;
   outputs: Record<string, Json>;
   vars: Record<string, Json>;
