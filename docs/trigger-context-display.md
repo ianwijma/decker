@@ -159,7 +159,9 @@ Shared `buttonAppearance` composition remains:
 The bounded toggle `stateLabel` remains independent of stage 3. Activity expiry
 recomposes the latest underlying values, including updates committed while the
 activity was visible. Main uses this helper for authorized web views and device
-frames; desktop keys use the same snapshot/helper. Authored editor previews stay
+frames; desktop keys use the same snapshot/helper. Validated display maps keep their complete bounded
+identities instead of passing through diagnostic object truncation; text fields
+are scrubbed individually. Authored editor previews stay
 separate. Existing native frame deduplication and stable flow selectors remain.
 Web clients receive only their deck's composed display/status, without cache,
 authority, history or private outputs. Existing asset serving authorizes only

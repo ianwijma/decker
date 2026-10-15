@@ -1,4 +1,4 @@
-import { DisplayState } from "./display-state";
+import { DisplayState, displayObserved } from "./display-state";
 import { captureOrigin, originBinding } from "../shared/trigger-context";
 import {
   app,
@@ -121,13 +121,11 @@ let credentialEpoch = uid();
 const snapshot = (): Snapshot => {
   const secrets = Object.values(credentials?.all() ?? {}),
     display = displayState?.snapshot() ?? {};
-  const safeObserved = Object.fromEntries(
-    Object.entries({
-      ...observed,
-      buttonFeedback: legacyDisplayFeedback(feedback.snapshot(), display),
-      buttonDisplay: display,
-      diagnostics: diagnosticFaults.snapshot(),
-    }).map(([key, value]) => [key, redactDiagnostics(value, secrets)]),
+  const safeObserved = displayObserved(
+    { ...observed, diagnostics: diagnosticFaults.snapshot() },
+    feedback.snapshot(),
+    display,
+    secrets,
   );
   const safeDevices = devices.map(
     (device) => redactDiagnostics(device, secrets) as typeof device,

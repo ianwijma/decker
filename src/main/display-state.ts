@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import sharp from "sharp";
-import { activityKey } from "../shared/feedback";
+import { activityKey, legacyDisplayFeedback } from "../shared/feedback";
+import { redactDiagnostics } from "../shared/health";
 import {
   displayPatchSchema,
   displayActionSchema,
@@ -241,10 +242,7 @@ export class DisplayState {
       for (const field of ["label", "icon"] as const) {
         const value = fields[field];
         if (typeof value === "string") {
-          let safe = value;
-          for (const secret of this.secrets().filter(Boolean))
-            safe = safe.split(secret).join("[redacted]");
-          fields[field] = safe;
+          fields[field] = redactDiagnostics(value, this.secrets());
         }
       }
     }
@@ -327,8 +325,46 @@ export class DisplayState {
           id: e.origin.bindingId,
           generation: e.origin.generation,
         }),
-        { ...e.fields },
+        {
+          ...e.fields,
+          ...(e.fields.label !== undefined
+            ? {
+                label: String(
+                  redactDiagnostics(e.fields.label, this.secrets()),
+                ).slice(0, 80),
+              }
+            : {}),
+          ...(e.fields.icon !== undefined
+            ? {
+                icon: String(
+                  redactDiagnostics(e.fields.icon, this.secrets()),
+                ).slice(0, 100),
+              }
+            : {}),
+        },
       ]),
     );
   }
+}
+
+/** Display/activity are already bounded trusted services, not diagnostic payloads.
+ * Preserve every exact identity; diagnostic redaction's 50-property cap must not
+ * truncate desktop display while main's web/device projections remain complete.
+ */
+export function displayObserved(
+  observed: Record<string, Json>,
+  activity: Record<string, Json>,
+  display: Record<string, Json>,
+  secrets: string[],
+): Record<string, Json> {
+  return {
+    ...Object.fromEntries(
+      Object.entries(observed).map(([key, value]) => [
+        key,
+        redactDiagnostics(value, secrets),
+      ]),
+    ),
+    buttonFeedback: legacyDisplayFeedback(activity, display),
+    buttonDisplay: display,
+  };
 }

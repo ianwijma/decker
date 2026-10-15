@@ -325,7 +325,7 @@ test("names duplicate producers, keeps references through rename, retains mode d
       await page.evaluate(() => window.decker.snapshot())
     ).document.workflows.find((w) => w.id === ids)!.graph.nodes[2].action!
       .config.body;
-  expect(await read()).toEqual({
+  await expect.poll(read).toEqual({
     $ref: ["outputs", "first.with.dots", "body"],
   });
   await page
@@ -345,7 +345,7 @@ test("names duplicate producers, keeps references through rename, retains mode d
   await expect(
     page.getByRole("button", { name: /^Data for Message:/ }),
   ).toContainText("Renamed fetch / body");
-  expect(await read()).toEqual({
+  await expect.poll(read).toEqual({
     $ref: ["outputs", "first.with.dots", "body"],
   });
   await page.evaluate(async () => {

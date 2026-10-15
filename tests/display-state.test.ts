@@ -7,7 +7,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
-import { DisplayState, DISPLAY_LIMITS } from "../src/main/display-state";
+import {
+  DisplayState,
+  DISPLAY_LIMITS,
+  displayObserved,
+} from "../src/main/display-state";
 import { defaults, binding, uid } from "../src/shared/defaults";
 import { activityKey, buttonAppearance } from "../src/shared/feedback";
 import { captureOrigin, originKey } from "../src/shared/trigger-context";
@@ -564,6 +568,42 @@ describe("last-good display and authority", () => {
     await expect(
       f.state.commit({ label, background: "#123456", icon: "x" }, run.context),
     ).rejects.toThrow();
+  });
+  it("keeps more than 50 identities in desktop snapshots and matches web/device composition", async () => {
+    const f = await fixture();
+    f.deck.rows = 8;
+    for (let i = 0; i < 60; i++) {
+      const key = binding("desktop.copy");
+      f.document.profiles[0].pages[0].keys[i] = key;
+      const origin = captureOrigin(f.document, f.deck.id, key)!,
+        launch = f.state.accept("button", origin),
+        runId = uid(),
+        actionId = uid();
+      f.state.begin(launch.authority!, runId);
+      f.state.action(launch.authority!, runId, actionId, true);
+      await f.state.commit(
+        { label: `Key ${i}`, background: "#123456" },
+        { authority: launch.authority, runId, actionId },
+      );
+      f.state.end(launch.authority!);
+    }
+    const display = f.state.snapshot(),
+      desktop = displayObserved(
+        { provider: { password: "private" } },
+        {},
+        display,
+        [],
+      );
+    expect(Object.keys(desktop.buttonDisplay as object)).toHaveLength(60);
+    expect(Object.keys(desktop.buttonFeedback as object)).toHaveLength(60);
+    expect(desktop.provider).toEqual({ password: "[redacted]" });
+    const key = f.document.profiles[0].pages[0].keys[59];
+    expect(buttonAppearance(key, desktop, "#abcdef", f.deck.id)).toEqual(
+      buttonAppearance(key, { buttonDisplay: display }, "#abcdef", f.deck.id),
+    );
+    expect(buttonAppearance(key, desktop, "#abcdef", f.deck.id).label).toBe(
+      "Key 59",
+    );
   });
   it("an Engine hanging handler cannot commit after cancellation even before its final history record", async () => {
     const f = await fixture(),

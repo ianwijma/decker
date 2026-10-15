@@ -122,9 +122,13 @@ test("shows independent repair guidance, copies fixed text, retries and recovers
   await app.evaluate(({ BrowserWindow, ipcMain }, serialized) => {
     const context = globalThis as unknown as {
       diagnosticRequests: unknown[];
+      diagnosticSnapshot: import("../../src/shared/schema").Snapshot;
       emitDiagnostics: (fixture: string) => void;
     };
     context.diagnosticRequests = [];
+    context.diagnosticSnapshot = JSON.parse(serialized);
+    ipcMain.removeHandler("decker:snapshot");
+    ipcMain.handle("decker:snapshot", () => context.diagnosticSnapshot);
     ipcMain.removeHandler("decker:request");
     ipcMain.handle("decker:request", (_event, request) => {
       context.diagnosticRequests.push(request);
@@ -133,10 +137,14 @@ test("shows independent repair guidance, copies fixed text, retries and recovers
     const contents = BrowserWindow.getAllWindows()[0].webContents;
     const send = contents.send.bind(contents);
     contents.send = (channel, ...args) => {
-      if (channel !== "decker:snapshot") send(channel, ...args);
+      if (channel === "decker:snapshot")
+        send(channel, context.diagnosticSnapshot);
+      else send(channel, ...args);
     };
-    context.emitDiagnostics = (fixture) =>
-      send("decker:snapshot", JSON.parse(fixture));
+    context.emitDiagnostics = (fixture) => {
+      context.diagnosticSnapshot = JSON.parse(fixture);
+      send("decker:snapshot", context.diagnosticSnapshot);
+    };
     context.emitDiagnostics(serialized);
   }, JSON.stringify(fixture));
   const hardware = page.getByRole("article", { name: "Test XL", exact: true });
