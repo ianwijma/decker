@@ -86,7 +86,7 @@ const definitions: Omit<
     id: "image.fetch",
     name: "Fetch image",
     group: "Developer",
-    icon: "pack:lucide:v1:image",
+    icon: "▧",
     description:
       "Fetch a bounded static image to a local asset. Bind its asset output to Update triggering button.",
     capabilities: [],
