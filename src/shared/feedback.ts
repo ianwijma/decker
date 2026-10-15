@@ -102,6 +102,7 @@ export function selectBindingRun(
 
 export type ButtonAppearance = KeyBinding["appearance"] & {
   stateLabel?: string;
+  imageStatus?: "stale";
 };
 /** The same composition feeds desktop keys, web views and device frames. */
 export function buttonAppearance(
@@ -128,6 +129,13 @@ export function buttonAppearance(
   appearance = {
     ...stateAppearance(appearance, dynamic?.[activityKey(deckId, binding)]),
     stateLabel: appearance.stateLabel,
+    imageStatus:
+      (
+        dynamic?.[activityKey(deckId, binding)] as
+          { imageStatus?: string } | undefined
+      )?.imageStatus === "stale"
+        ? "stale"
+        : undefined,
   };
   const feedback = observed.buttonFeedback as
     Record<string, Record<string, Json>> | undefined;

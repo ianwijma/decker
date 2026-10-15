@@ -115,6 +115,8 @@ function renderKey(
   button.append(element("span", key?.label ?? "", "label"));
   if (key?.stateLabel)
     button.append(element("small", key.stateLabel, "toggle-state"));
+  if (key?.imageStatus === "stale")
+    button.append(element("small", "Image stale", "image-status"));
 }
 function render(next: WebDeckView) {
   const changed =

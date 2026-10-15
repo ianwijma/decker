@@ -13,7 +13,7 @@ export type CredentialOwner = {
 export function credentialOwners(document: AppDocument): CredentialOwner[] {
   const owners: CredentialOwner[] = [];
   const action = (a: ActionInstance, path: string[], label: string) => {
-    if (a.type !== "http.request") return;
+    if (!["http.request", "image.fetch"].includes(a.type)) return;
     owners.push({
       key: JSON.stringify(path),
       label,

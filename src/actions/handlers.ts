@@ -17,7 +17,7 @@ export function handlers(
   main: (
     type: string,
     config: Record<string, Json>,
-    context: ActionContext,
+    context: ActionContext & { imageSecret?: string },
   ) => Promise<Json>,
   obs: ObsConnections,
 ): Handler {
@@ -50,6 +50,20 @@ export function handlers(
           return parseJson(c.input);
         case "data.extract":
           return extractValue(c);
+        case "image.fetch": {
+          // Capture the immutable in-flight credential value in the worker, just
+          // like HTTP. It crosses only the trusted worker/main boundary.
+          const secret = s("credentialRef")
+            ? lookupSecret(secrets(), s("credentialRef"))
+            : undefined;
+          if (s("credentialRef") && !secret)
+            throw new Error(
+              "Image bearer token is missing or locked. Enter or replace it in this action.",
+            );
+          return protectSecret(secret, () =>
+            main(action.type, c, { ...context, imageSecret: secret }),
+          );
+        }
         case "app.launch":
           return new Promise((resolve, reject) => {
             const child = spawn(s("executable"), args(), {

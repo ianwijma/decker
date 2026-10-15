@@ -17,6 +17,7 @@ const view = z.object({
     z.string(),
     z.object({
       stateLabel: z.string().max(40).optional(),
+      imageStatus: z.literal("stale").optional(),
       toggle: z
         .object({
           confirmed: z.enum(["on", "off", "unknown"]),

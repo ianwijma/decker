@@ -663,6 +663,7 @@ export const runRecordSchema: z.ZodType<RunRecord> = z.object({
 
 export type WebKey = {
   stateLabel?: string;
+  imageStatus?: "stale";
   toggle?: import("./toggle-presentation").ToggleDisplay;
   label: string;
   icon: string;

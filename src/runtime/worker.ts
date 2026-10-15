@@ -29,7 +29,7 @@ const replies = new Map<
 const main = async (
   type: string,
   config: Record<string, Json>,
-  context: ActionContext,
+  context: ActionContext & { imageSecret?: string },
 ) =>
   new Promise<Json>((resolve, reject) => {
     context.signal.throwIfAborted();
@@ -48,6 +48,12 @@ const main = async (
     const abort = () => {
       lifecycle(false);
       replies.delete(id);
+      send({
+        type: "cancelMainAction",
+        id,
+        runId: context.runId,
+        actionId: context.actionId,
+      });
       reject(new Error("Action cancelled"));
     };
     context.signal.addEventListener("abort", abort, { once: true });
@@ -75,6 +81,7 @@ const main = async (
         bindingId: context.bindingId,
         generation: context.generation,
         deckId: context.deckId,
+        imageSecret: context.imageSecret,
       },
     });
   });

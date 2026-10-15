@@ -306,6 +306,15 @@ export function Deck() {
                     />
                   )}
                   <span className="key-label">{b?.appearance.label ?? ""}</span>
+                  {b?.appearance.imageStatus === "stale" && (
+                    <small
+                      className="image-status"
+                      role="status"
+                      title="Image fetch failed; showing last good image"
+                    >
+                      Image stale
+                    </small>
+                  )}
                   {b?.appearance.stateLabel && (
                     <small className="toggle-key-state">
                       {b.appearance.stateLabel}
