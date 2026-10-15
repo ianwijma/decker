@@ -321,3 +321,11 @@ fingerprint. Main rechecks it inside the mutation queue, so a graph/alias/connec
 edit rejects an obsolete queued prepare/commit/recovery even when its configured
 workflow target and durable stamp are unchanged. This fingerprint is private
 request metadata, not a new stored-record format, preserving valid v4 state.
+
+Post-transition reconciliation and explicit Refresh perform bounded fresh reads
+through the same media/audio providers and OBS connection. They do not declare a
+pre-command cached value fresh merely because a target returned successfully.
+Live polls reuse pending provider reads; deliberate fresh reads supersede older
+samples. Existing live events and polls
+continue unchanged and add no timer. OBS query responses are guarded against
+newer field observations, connection replacement and stale binding definitions.

@@ -14,6 +14,7 @@ import {
   mkdir,
   chmod,
 } from "node:fs/promises";
+import sharp from "sharp";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { binding, defaults } from "../../src/shared/defaults";
@@ -79,6 +80,69 @@ async function configureCommand(
   await group
     .getByLabel("Arguments (JSON array)", { exact: true })
     .fill(JSON.stringify(["-c", script, "fixture", ...args]));
+}
+type ImageGate = typeof globalThis & {
+  finishAsset?: (result: { canceled: boolean; filePaths: string[] }) => void;
+  assetResult?: unknown;
+};
+async function imageGate() {
+  const path = join(directory, "image-fixture.png");
+  await writeFile(
+    path,
+    await sharp({
+      create: { width: 8, height: 8, channels: 3, background: "#123456" },
+    })
+      .png()
+      .toBuffer(),
+  );
+  await app.evaluate(({ dialog, ipcMain }) => {
+    const handlers = (
+      ipcMain as unknown as {
+        _invokeHandlers: Map<
+          string,
+          (event: unknown, request: unknown) => Promise<unknown>
+        >;
+      }
+    )._invokeHandlers;
+    const original = handlers.get("decker:request");
+    if (!original) throw new Error("Request handler missing");
+    ipcMain.removeHandler("decker:request");
+    ipcMain.handle("decker:request", async (event, request: unknown) => {
+      const result = await original(event, request);
+      if ((request as { type?: string }).type === "asset")
+        (globalThis as ImageGate).assetResult = result;
+      return result;
+    });
+    dialog.showOpenDialog = (async () =>
+      new Promise((resolve) => {
+        (globalThis as ImageGate).assetResult = undefined;
+        (globalThis as ImageGate).finishAsset = resolve;
+      })) as typeof dialog.showOpenDialog;
+  });
+  return path;
+}
+async function finishAsset(path: string) {
+  await expect
+    .poll(() =>
+      app.evaluate(() => typeof (globalThis as ImageGate).finishAsset),
+    )
+    .toBe("function");
+  await app.evaluate((_, path) => {
+    const state = globalThis as ImageGate;
+    state.finishAsset!({ canceled: false, filePaths: [path] });
+    state.finishAsset = undefined;
+  }, path);
+  await expect
+    .poll(() => app.evaluate(() => (globalThis as ImageGate).assetResult))
+    .toMatch(/^[a-f0-9]{64}$/);
+  // Drain the real asset reply and render before checking that the stale owner stayed unchanged.
+  await page.evaluate(async () => {
+    await window.decker.snapshot();
+    await new Promise(requestAnimationFrame);
+  });
+  await expect(
+    page.getByText("All changes saved", { exact: true }),
+  ).toBeVisible();
 }
 async function saveToggle() {
   await page
@@ -369,28 +433,12 @@ test("saved on/off/probe HTTP owners use managed secrets; stale image completion
     async () => (await window.decker.snapshot()).credentialState?.owners,
   );
   expect(Object.keys(owners!).filter((k) => k.includes(b.id))).toHaveLength(3);
-  await page.evaluate(() => {
-    const original = window.decker.request;
-    (window as unknown as { finishImage: (s: string) => void }).finishImage =
-      () => {};
-    window.decker.request = (request) =>
-      request.type === "asset"
-        ? new Promise((resolve) => {
-            (
-              window as unknown as { finishImage: (s: string) => void }
-            ).finishImage = resolve;
-          })
-        : original(request);
-  });
+  const image = await imageGate();
   await page
     .getByRole("button", { name: "Choose on image…", exact: true })
     .click();
   await page.getByRole("button", { name: /^Key 2: Other/ }).click();
-  await page.evaluate(() =>
-    (window as unknown as { finishImage: (s: string) => void }).finishImage(
-      "a".repeat(64),
-    ),
-  );
+  await finishAsset(image);
   await expect(page.getByLabel("Button mode", { exact: true })).toHaveValue(
     "ordinary",
   );
@@ -407,7 +455,9 @@ base=$(dirname "$0")
 case "$1" in
   status) exit 0 ;;
   get-volume) case "$2" in *SOURCE*) cat "$base/microphone" ;; *) cat "$base/speaker" ;; esac ;;
-  set-mute) exit 0 ;;
+  set-mute) if [ -f "$base/accept" ]; then
+    if [ "$3" = 1 ]; then printf 'Volume: 0.8 [MUTED]' > "$base/microphone"; else printf 'Volume: 0.8' > "$base/microphone"; fi
+    fi; exit 0 ;;
   *) exit 1 ;;
 esac
 `,
@@ -477,6 +527,16 @@ esac
   await expect(
     page.getByRole("button", { name: /^Key 1: Mic muted/ }),
   ).toBeVisible();
+  await writeFile(join(bin, "accept"), "");
+  await page.getByRole("button", { name: "Execute saved toggle" }).click();
+  // Confirm from a fresh provider read after the effect, before the next 4s poll.
+  await expect
+    .poll(state, { timeout: 1500 })
+    .toMatchObject({ confirmed: "off", fresh: true, transitioning: false });
+  await writeFile(join(bin, "microphone"), "Volume: 0.8 [MUTED]");
+  await expect
+    .poll(state, { timeout: 10000 })
+    .toMatchObject({ confirmed: "on", fresh: true });
   await writeFile(join(bin, "microphone"), "invalid observation");
   await expect
     .poll(state, { timeout: 10000 })
@@ -717,4 +777,56 @@ test("OBS connection replacement invalidates a running target and reconciles onl
     await first.close();
     await second.close();
   }
+});
+
+test("replacement generations discard drafts and reject late image results for the same key", async () => {
+  const doc = defaults(),
+    b = binding("desktop.copy", "Owned key");
+  delete b.press;
+  b.toggle = {
+    on: command("true"),
+    off: command("true"),
+    source: { kind: "app", initial: "off" },
+  };
+  doc.profiles[0].pages[0].keys = { 0: b };
+  await launch(doc);
+  const image = await imageGate();
+  await page.getByLabel("on label", { exact: true }).fill("Stale draft");
+  await page
+    .getByRole("button", { name: "Choose on image…", exact: true })
+    .click();
+  await page.evaluate(async () => {
+    const doc = (await window.decker.snapshot()).document;
+    const t = doc.profiles[0].pages[0].keys[0].toggle!;
+    if (t.on.kind !== "action") throw new Error();
+    t.on.action.config.executable = "/bin/false";
+    await window.decker.request({ type: "save", document: doc });
+  });
+  await expect(
+    page.getByRole("button", { name: "Save toggle configuration" }),
+  ).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("group", { name: "On target", exact: true })
+      .getByLabel("Executable", { exact: true }),
+  ).toHaveValue("/bin/false");
+  await finishAsset(image);
+  expect((await saved()).toggle!.appearance).toBeUndefined();
+  await page
+    .getByRole("button", { name: "Choose image…", exact: true })
+    .click();
+  await page.evaluate(async () => {
+    const doc = (await window.decker.snapshot()).document;
+    const t = doc.profiles[0].pages[0].keys[0].toggle!;
+    if (t.off.kind !== "action") throw new Error();
+    t.off.action.config.executable = "/bin/false";
+    await window.decker.request({ type: "save", document: doc });
+  });
+  await expect(
+    page
+      .getByRole("group", { name: "Off target", exact: true })
+      .getByLabel("Executable", { exact: true }),
+  ).toHaveValue("/bin/false");
+  await finishAsset(image);
+  expect((await saved()).appearance.asset).toBeUndefined();
 });

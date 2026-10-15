@@ -41,7 +41,14 @@ export function Deck() {
   const imageEpoch = useRef(0);
   useLayoutEffect(() => {
     imageEpoch.current++;
-  }, [deck.id, page.id, slot, key?.id, JSON.stringify(key?.appearance)]);
+  }, [
+    deck.id,
+    page.id,
+    slot,
+    key?.id,
+    key?.generation,
+    JSON.stringify(key?.appearance),
+  ]);
   const display = key
     ? toggleDisplay(key, selectToggle(snapshot!.toggles ?? [], key, deck.id))
     : undefined;
@@ -263,7 +270,8 @@ export function Deck() {
                   onClick={() => setSelected(index)}
                   onDoubleClick={() =>
                     b &&
-                    !toggle?.disabled &&
+                    (!toggle ||
+                      (!toggle.disabled && !useApp.getState().saving)) &&
                     void request({ type: "test", deckId: deck.id, binding: b })
                   }
                   onDragOver={(e) => e.preventDefault()}
@@ -560,7 +568,7 @@ export function Deck() {
               </button>
             )}
             <ToggleEditor
-              key={`${deck.id}:${page.id}:${slot}:${key.id}`}
+              key={`${deck.id}:${page.id}:${slot}:${key.id}:${key.generation}`}
               binding={key}
               deckId={deck.id}
               onSave={update}

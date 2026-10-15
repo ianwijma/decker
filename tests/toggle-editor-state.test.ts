@@ -1,3 +1,6 @@
+import { EventEmitter } from "node:events";
+import { ObsConnections } from "../src/integrations/obs";
+import type { DisposableObsClient } from "../src/integrations/obs-client";
 import { afterEach, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -592,4 +595,124 @@ it("rejects queued writes from obsolete workflow definitions while retaining cos
     ),
   );
   expect(raw.entries[0]).not.toHaveProperty("definitionStamp");
+});
+
+it("reconciles target completion from a fresh provider sample instead of the pre-command cache", async () => {
+  const { doc, b, deckId } = fixture(),
+    dir = await directory(),
+    store = new ToggleStorage(dir);
+  await store.load();
+  b.toggle!.source = {
+    kind: "observed",
+    observation: { kind: "media", player: "fixture" },
+    onWhen: true,
+  };
+  let playing = false;
+  const reader = vi.fn(async () => ({
+    media: { fixture: playing ? "Playing" : "Paused" },
+  }));
+  const service = new Toggles(
+    new Engine(
+      async () => {
+        playing = true;
+        return null;
+      },
+      () => {},
+    ),
+    (r) => store.request(r, doc),
+    () => {},
+    reader,
+  );
+  service.configure(doc);
+  await service.settled();
+  expect(reader).not.toHaveBeenCalled();
+  service.updateObservations({ media: { fixture: "Paused" } });
+  await service.reconcile(deckId, b.id);
+  expect(service.snapshot()[0]).toMatchObject({
+    confirmed: "off",
+    fresh: true,
+  });
+  b.appearance.label = "Cosmetic";
+  service.configure(doc);
+  expect(reader).toHaveBeenCalledTimes(1);
+  await service.press(deckId, b);
+  expect(reader).toHaveBeenCalledTimes(2);
+  expect(service.snapshot()[0]).toMatchObject({ confirmed: "on", fresh: true });
+  // Unrelated provider events cannot replace the fresh sample with an old full snapshot.
+  service.updateObservations({
+    speaker: { stdout: "Volume: 0.5", exitCode: 0 },
+  });
+  expect(service.snapshot()[0]).toMatchObject({ confirmed: "on", fresh: true });
+  service.stop();
+});
+
+it("does not let delayed initial OBS queries overwrite a newer read or event", async () => {
+  let initial = () => {},
+    older = () => {},
+    streams = 0;
+  const client = Object.assign(new EventEmitter(), {
+    connect: async () => {},
+    dispose: async () => {},
+    call: vi.fn(async (type: string) => {
+      if (type === "GetCurrentProgramScene")
+        return { currentProgramSceneName: "Main" };
+      if (type === "GetRecordStatus") return { outputActive: false };
+      if (type === "GetStreamStatus") {
+        if (++streams === 1)
+          return new Promise((resolve) => {
+            initial = () => resolve({ outputActive: false });
+          });
+        if (streams === 2) return { outputActive: true };
+        if (streams === 3)
+          return new Promise((resolve) => {
+            older = () => resolve({ outputActive: true });
+          });
+        return { outputActive: false };
+      }
+      if (type === "GetInputList") return { inputs: [] };
+      if (type === "GetSceneList") return { scenes: [] };
+      throw new Error("Unexpected read");
+    }),
+  });
+  const samples: Json[] = [],
+    obs = new ObsConnections(
+      (_id, value) => samples.push(value),
+      () => client as unknown as DisposableObsClient,
+    ),
+    connection = { id: "studio", name: "Studio", url: "ws://localhost:4455" };
+  await obs.get(connection);
+  await vi.waitFor(() => expect(streams).toBe(1));
+  expect(
+    await obs.readObservation(
+      connection,
+      undefined,
+      { kind: "obs", connectionId: "studio", property: "streaming", name: "" },
+      () => true,
+    ),
+  ).toMatchObject({ streaming: true });
+  initial();
+  await vi.waitFor(() =>
+    expect(samples.at(-1)).toMatchObject({ streaming: true, recording: false }),
+  );
+  const delayed = obs.readObservation(
+    connection,
+    undefined,
+    { kind: "obs", connectionId: "studio", property: "streaming", name: "" },
+    () => true,
+  );
+  await vi.waitFor(() => expect(streams).toBe(3));
+  expect(
+    await obs.readObservation(
+      connection,
+      undefined,
+      { kind: "obs", connectionId: "studio", property: "streaming", name: "" },
+      () => true,
+    ),
+  ).toMatchObject({ streaming: false });
+  older();
+  expect(await delayed).toMatchObject({ streaming: false });
+  expect(client.call.mock.calls.every(([type]) => type.startsWith("Get"))).toBe(
+    true,
+  );
+  await obs.close();
 });

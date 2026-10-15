@@ -1,6 +1,12 @@
 import { observedToggle } from "../shared/toggle-observation";
 import { randomUUID } from "node:crypto";
-import type { AppDocument, KeyBinding, Json, Target } from "../shared/schema";
+import type {
+  AppDocument,
+  KeyBinding,
+  Json,
+  Target,
+  ObservationSource,
+} from "../shared/schema";
 import {
   toggleBindings,
   toggleKey,
@@ -70,6 +76,15 @@ export class Toggles {
     private engine: Engine,
     private storage: ToggleStore,
     private emit: (states: ToggleState[]) => void,
+    private readObservation?: (
+      source: ObservationSource,
+      owner: {
+        deckId: string;
+        bindingId: string;
+        generation: number;
+        definitionStamp: string;
+      },
+    ) => Promise<Record<string, Json>>,
   ) {}
   snapshot() {
     return [...this.entries.values()]
@@ -156,7 +171,7 @@ export class Toggles {
         e.state.error = "interrupted";
       }
       if (source.kind !== "app") {
-        if (activate) await this.observe(e);
+        if (activate) await this.observe(e, undefined, true);
       } else e.state.fresh = !e.state.blocked;
     } catch {
       this.fail(e, "storage", true);
@@ -189,16 +204,30 @@ export class Toggles {
     e.handle = handle;
     return handle;
   }
-  private async observe(e: Entry, expected?: ConfirmedState) {
+  private async observe(e: Entry, expected?: ConfirmedState, refresh = false) {
     const source = e.binding.toggle!.source;
     if (source.kind === "app" || !e.valid || this.stopped) return;
     e.state.reconciling = true;
     e.state.fresh = false;
     this.publish();
-    const revision = this.observationRevision;
+    let revision = this.observationRevision;
     try {
       let observed: ConfirmedState | undefined;
       if (source.kind === "observed") {
+        if (refresh && this.readObservation) {
+          const sample = await this.readObservation(source.observation, {
+            deckId: e.state.deckId,
+            bindingId: e.binding.id,
+            generation: e.binding.generation,
+            definitionStamp: e.definitionStamp,
+          });
+          if (!e.valid) return;
+          this.observations = {
+            ...this.observations,
+            ...structuredClone(sample),
+          };
+          revision = ++this.observationRevision;
+        }
         const value = observedToggle(source.observation, this.observations);
         observed =
           value === undefined
@@ -337,7 +366,11 @@ export class Toggles {
         }
       } else if (result.status === "cancelled") this.fail(e, "cancelled");
       else {
-        await this.observe(e, result.status === "success" ? next : undefined);
+        await this.observe(
+          e,
+          result.status === "success" ? next : undefined,
+          true,
+        );
         if (result.status !== "success" && e.state.fresh)
           e.state.error =
             result.status === "failure" ? "transition-failed" : result.status;
@@ -350,7 +383,7 @@ export class Toggles {
   }
   /** Reuses adapter events/polls, never executes a target or adds a timer. */
   updateObservations(observed: Record<string, Json>) {
-    this.observations = structuredClone(observed);
+    this.observations = { ...this.observations, ...structuredClone(observed) };
     this.observationRevision++;
     for (const e of this.entries.values()) this.refreshObserved(e);
   }
@@ -389,7 +422,7 @@ export class Toggles {
     e.busy = true;
     e.observationActive = true;
     try {
-      await this.observe(e);
+      await this.observe(e, undefined, true);
       return e.state.fresh;
     } finally {
       e.busy = false;

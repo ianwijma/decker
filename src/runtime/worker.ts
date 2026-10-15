@@ -1,4 +1,5 @@
-import { targetWorkflow } from "./targets";
+import { toggleBindings } from "../shared/toggle-contract";
+import { targetWorkflow, toggleDefinitionStamp } from "./targets";
 import { Toggles } from "./toggles";
 import type { StoredToggle } from "../main/toggle-storage";
 import { findWorkflow } from "../shared/workflow-identity";
@@ -63,7 +64,7 @@ const main = async (
 let observations: Record<string, Json> = {};
 function observation(id: string, value: Json) {
   observations[id] = value;
-  toggles.updateObservations(observations);
+  toggles.updateObservations({ [id]: value });
   send({ type: "observed", id, value });
 }
 const obs = new ObsConnections((id, value) => observation(`obs:${id}`, value));
@@ -111,6 +112,55 @@ const storageReplies = new Map<
     timer: ReturnType<typeof setTimeout>;
   }
 >();
+let configurationEpoch = 0;
+type ObservationRead = {
+  epoch: number;
+  pending: boolean;
+  promise: Promise<Record<string, Json>>;
+};
+type ObservationCell = { pending: number; latest?: ObservationRead };
+const observationReads = new Map<string, ObservationCell>();
+/** New deliberate reads supersede old samples; live polls reuse pending work. */
+function readProvider(
+  key: string,
+  fresh: boolean,
+  read: () => Promise<Record<string, Json>>,
+  accept: () => boolean,
+) {
+  const cell = observationReads.get(key) ?? { pending: 0 };
+  if (
+    !fresh &&
+    cell.latest?.pending &&
+    cell.latest.epoch === configurationEpoch
+  )
+    return cell.latest.promise;
+  const entry: ObservationRead = {
+    epoch: configurationEpoch,
+    pending: true,
+    promise: Promise.resolve({}),
+  };
+  cell.pending++;
+  cell.latest = entry;
+  observationReads.set(key, cell);
+  entry.promise = Promise.resolve().then(async () => {
+    try {
+      const sample = await read();
+      if (cell.latest !== entry) return await cell.latest!.promise;
+      if (!accept()) throw new Error("Observation replaced");
+      for (const [id, value] of Object.entries(sample)) observation(id, value);
+      return sample;
+    } catch (error) {
+      if (cell.latest !== entry) return await cell.latest!.promise;
+      throw error;
+    } finally {
+      entry.pending = false;
+      cell.pending--;
+      if (!cell.pending && observationReads.get(key) === cell)
+        observationReads.delete(key);
+    }
+  });
+  return entry.promise;
+}
 const toggles = new Toggles(
   engine,
   (request) =>
@@ -124,6 +174,56 @@ const toggles = new Toggles(
       send({ type: "toggleStorage", id, request });
     }),
   (states) => send({ type: "toggles", states }),
+  async (source, owner) => {
+    const valid = () =>
+      toggleBindings(document).some(
+        ({ deckId, binding }) =>
+          deckId === owner.deckId &&
+          binding.id === owner.bindingId &&
+          binding.generation === owner.generation &&
+          toggleDefinitionStamp(binding, document) === owner.definitionStamp,
+      );
+    const id =
+      source.kind === "media"
+        ? "media"
+        : source.kind === "audio"
+          ? source.target
+          : `obs:${source.connectionId}`;
+    const key = source.kind === "obs" ? JSON.stringify(source) : id;
+    await readProvider(
+      key,
+      true,
+      async (): Promise<Record<string, Json>> => {
+        if (source.kind === "media")
+          return {
+            media: await observedMedia().catch(() => ({ unavailable: true })),
+          };
+        if (source.kind === "audio")
+          return {
+            [source.target]: await observedAudio(
+              source.target === "microphone",
+            ),
+          };
+        const connection = document.connections.find(
+          (c) => c.id === source.connectionId,
+        );
+        if (!connection) throw new Error("Observation connection missing");
+        return {
+          [id]: await obs.readObservation(
+            connection,
+            connection.credentialRef
+              ? credentials[connection.credentialRef]
+              : undefined,
+            source,
+            valid,
+          ),
+        };
+      },
+      valid,
+    );
+    if (!valid()) throw new Error("Observation owner replaced");
+    return { [id]: observations[id] };
+  },
 );
 const schema = z.discriminatedUnion("type", [
   z.object({
@@ -173,7 +273,6 @@ const schema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("diagnose") }),
   z.object({ type: z.literal("stop") }),
 ]);
-let configurationEpoch = 0;
 let diagnosing = false;
 async function diagnose() {
   if (diagnosing) return;
@@ -212,10 +311,12 @@ port.on("message", async (event) => {
         credentials = message.credentials;
         if (changed)
           for (const id of Object.keys(observations))
-            if (id.startsWith("obs:")) delete observations[id];
+            if (id.startsWith("obs:")) {
+              delete observations[id];
+              toggles.updateObservations({ [id]: { connected: false } });
+            }
         // Invalidate captured targets immediately, before bounded socket cleanup.
         toggles.configure(document, message.activateToggles);
-        toggles.updateObservations(observations);
         if (changed) await obs.close();
         if (epoch !== configurationEpoch) break;
         void diagnose();
@@ -322,15 +423,28 @@ setInterval(async () => {
   observing = true;
   try {
     const captured = document;
-    const [microphone, speaker, media] = await Promise.all([
-      observedAudio(),
-      observedAudio(false),
-      observedMedia().catch(() => ({ unavailable: true })),
-    ]);
-    if (captured !== document) return;
-    observation("microphone", microphone);
-    observation("speaker", speaker);
-    observation("media", media);
+    await Promise.all([
+      readProvider(
+        "microphone",
+        false,
+        async () => ({ microphone: await observedAudio() }),
+        () => captured === document,
+      ),
+      readProvider(
+        "speaker",
+        false,
+        async () => ({ speaker: await observedAudio(false) }),
+        () => captured === document,
+      ),
+      readProvider(
+        "media",
+        false,
+        async () => ({
+          media: await observedMedia().catch(() => ({ unavailable: true })),
+        }),
+        () => captured === document,
+      ),
+    ]).catch(() => {});
   } finally {
     observing = false;
   }
