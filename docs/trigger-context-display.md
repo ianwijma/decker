@@ -176,7 +176,8 @@ on the captured page, including when it is not currently visible. The cache is
 bounded to **4096 entries and 1,000,000 UTF-8 bytes**. Least-recently-committed
 entries are evicted first; reads/renders never change recency or write disk.
 Private authority metadata is separately bounded to 4096 invocations with at most
-64 live main-action tickets each; fingerprints are fixed-size SHA-256 strings.
+10,000 main-action tickets per active root (the engine step budget); fingerprints
+are fixed-size SHA-256 strings. The engine still caps active roots at 64.
 
 Startup uses strict format/field bounds and live identity validation. Duplicate,
 malformed/truncated, unsupported or oversized cache files are quarantined as

@@ -127,7 +127,7 @@ export class DisplayState {
   action(token: string, runId: string, actionId: string, active: boolean) {
     const a = this.authorities.get(token);
     if (!a || a.runId !== runId) return;
-    if (active && a.actions.size < 64) a.actions.add(actionId);
+    if (active && a.actions.size < 10_000) a.actions.add(actionId);
     else a.actions.delete(actionId);
   }
   invalidate() {

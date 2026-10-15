@@ -40,6 +40,7 @@ export function FilePickerButton({
   label: string;
   onSelect: (path: string) => void;
 }) {
+  const saving = useApp((state) => state.saving);
   const [pending, setPending] = useState(false),
     revision = useRef(0),
     select = useRef(onSelect);
@@ -58,7 +59,7 @@ export function FilePickerButton({
     <button
       type="button"
       aria-label={`Choose ${label}`}
-      disabled={pending}
+      disabled={pending || (picker === "asset" && saving)}
       onClick={async () => {
         const token = ++revision.current;
         setPending(true);

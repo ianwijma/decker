@@ -287,9 +287,12 @@ test("local image control updates a saved key and supports partial fields withou
   await page
     .getByRole("checkbox", { name: "Update Local image", exact: true })
     .check();
-  await page
-    .getByRole("button", { name: "Choose local image", exact: true })
-    .click();
+  const chooser = page.getByRole("button", {
+    name: "Choose local image",
+    exact: true,
+  });
+  await expect(chooser).toBeEnabled();
+  await chooser.click();
   await expect
     .poll(() =>
       page.evaluate(

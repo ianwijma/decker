@@ -523,6 +523,30 @@ describe("last-good display and authority", () => {
       ),
     ).rejects.toThrow("No valid");
   });
+  it("authorizes more than 64 simultaneous action tickets within one supported parallel invocation", async () => {
+    const f = await fixture(),
+      run = f.start(),
+      tickets = Array.from({ length: 80 }, () => uid());
+    for (const ticket of tickets)
+      f.state.action(run.context.authority, run.context.runId, ticket, true);
+    await f.state.commit(
+      { label: "parallel branch 80" },
+      { ...run.context, actionId: tickets[79] },
+    );
+    f.state.action(
+      run.context.authority,
+      run.context.runId,
+      tickets[79],
+      false,
+    );
+    await expect(
+      f.state.commit(
+        { label: "cancelled branch" },
+        { ...run.context, actionId: tickets[79] },
+      ),
+    ).rejects.toThrow("No valid");
+    expect(f.display()).toMatchObject({ label: "parallel branch 80" });
+  });
   it("an Engine hanging handler cannot commit after cancellation even before its final history record", async () => {
     const f = await fixture(),
       a = {
