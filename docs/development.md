@@ -37,6 +37,12 @@ Electron, native modules, icon notices and installer manifests/checksums, then
 publishes immutable development prereleases on successful **develop pushes**.
 Publication is skipped on PR events. See the [CI workflow](../.github/workflows/ci.yml).
 
+Pull-request and branch CI runs static checks/unit tests, source Electron tests,
+and Linux packaging/packaged Electron tests in parallel jobs. Source and packaged
+test reports are uploaded separately. The `Test and package Linux` check requires
+all three jobs to pass before the same-run installer artifact can be published on
+a develop push.
+
 The lockfile pins dependency resolutions. node-hid and sharp ship ABI-stable
 Node-API prebuilds; native binaries are unpacked from ASAR and loaded from packaged
 workers. [Acceptance](ACCEPTANCE.md) distinguishes software evidence from pending

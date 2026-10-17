@@ -480,22 +480,54 @@ it("keeps verification read-only, preserves smoke gates and selects an artifact 
   expect(workflow.on.pull_request).toBeNull();
   expect(workflow.permissions).toEqual({ contents: "read" });
   expect(workflow.concurrency).toBeUndefined();
-  expect(workflow.jobs.verify.permissions).toBeUndefined();
-  const verify = workflow.jobs.verify.steps;
-  const commands = verify
+  const jobs = workflow.jobs;
+  for (const job of [jobs.checks, jobs.electron, jobs.package]) {
+    expect(job.permissions).toBeUndefined();
+    expect(job.needs).toBeUndefined();
+    expect(job.steps.some((s: { run?: string }) => s.run === "npm ci")).toBe(
+      true,
+    );
+  }
+  const commands = jobs.checks.steps
     .filter((s: { run?: string }) => s.run)
     .map((s: { run: string }) => s.run);
   for (const command of [
-    "npm ci",
     "npm run format:check",
     "npm run typecheck",
     "npm test",
-    "npm run build",
   ])
     expect(commands).toContain(command);
+  const sourceBuild = jobs.electron.steps.findIndex(
+    (s: { run?: string }) => s.run === "npm run build",
+  );
+  const sourceTests = jobs.electron.steps.findIndex(
+    (s: { run?: string }) =>
+      s.run === "xvfb-run --auto-servernum npm run test:e2e",
+  );
+  expect(sourceBuild).toBeGreaterThan(-1);
+  expect(sourceTests).toBeGreaterThan(sourceBuild);
+  expect(
+    jobs.electron.steps[sourceTests].env?.DECKER_EXECUTABLE,
+  ).toBeUndefined();
+  const reportNames = [jobs.electron, jobs.package].map((job) => {
+    const report = job.steps.find(
+      (s: { uses?: string; id?: string }) =>
+        s.uses?.startsWith("actions/upload-artifact") && s.id !== "packages",
+    );
+    expect(report.if).toBe("always()");
+    expect(report.with.path).toContain("test-results/");
+    return report.with.name;
+  });
+  expect(new Set(reportNames).size).toBe(2);
+  const verify = jobs.package.steps;
+  const build = verify.findIndex((s: { run?: string }) =>
+    s.run?.startsWith("npm run package --"),
+  );
+  expect(build).toBeGreaterThan(-1);
   const smoke = verify.findIndex(
     (s: { env?: { DECKER_EXECUTABLE?: string } }) => s.env?.DECKER_EXECUTABLE,
   );
+  expect(smoke).toBeGreaterThan(build);
   expect(verify[smoke].run).toBe("xvfb-run --auto-servernum npm run test:e2e");
   const checksum = verify.findIndex((s: { run?: string }) =>
     s.run?.includes("nightly.ts bundle"),
@@ -508,6 +540,36 @@ it("keeps verification read-only, preserves smoke gates and selects an artifact 
   expect(verify[upload].with.name).toContain(
     "${{ github.run_id }}-${{ github.run_attempt }}",
   );
+  expect(jobs.package.outputs.artifact_id).toBe(
+    "${{ steps.packages.outputs.artifact-id }}",
+  );
+  expect(jobs.verify.name).toBe("Test and package Linux");
+  expect(jobs.verify.permissions).toBeUndefined();
+  expect(jobs.verify.needs).toEqual(["checks", "electron", "package"]);
+  expect(jobs.verify.if).toBe("always()");
+  expect(jobs.verify.outputs.artifact_id).toBe(
+    "${{ needs.package.outputs.artifact_id }}",
+  );
+  const gate = jobs.verify.steps[0];
+  expect(gate.env).toEqual({
+    CHECKS_RESULT: "${{ needs.checks.result }}",
+    ELECTRON_RESULT: "${{ needs.electron.result }}",
+    PACKAGE_RESULT: "${{ needs.package.result }}",
+  });
+  // Exercise the actual gate script: failures, cancellations and skipped jobs
+  // must fail the required check even when the other parallel jobs passed.
+  const { spawnSync } = await import("node:child_process");
+  const passing = {
+    CHECKS_RESULT: "success",
+    ELECTRON_RESULT: "success",
+    PACKAGE_RESULT: "success",
+  };
+  const runGate = (results: Record<string, string>) =>
+    spawnSync("bash", ["-e", "-c", gate.run], { env: results }).status;
+  expect(runGate(passing)).toBe(0);
+  for (const key of Object.keys(passing))
+    for (const result of ["failure", "cancelled", "skipped"])
+      expect(runGate({ ...passing, [key]: result })).not.toBe(0);
   const publisher = workflow.jobs.publish;
   expect(publisher.needs).toBe("verify");
   for (const guard of [
