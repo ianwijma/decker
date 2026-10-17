@@ -41,6 +41,10 @@ export function RefreshEditor({
   const saved = binding.refresh;
   useEffect(() => {
     if (openRequested) {
+      if (saved) {
+        setDraft(structuredClone(saved));
+        setInputs(JSON.stringify(saved.inputs, null, 2));
+      }
       setEditing(true);
       section.current?.scrollIntoView({ block: "nearest" });
     }
@@ -118,13 +122,22 @@ export function RefreshEditor({
             disabled={saving || (!saved.enabled && (!!savedError || dirty))}
             onClick={async () => {
               const token = ++epoch.current;
+              const documentAtRequest = JSON.stringify(
+                useApp.getState().snapshot?.document,
+              );
               const result = await request({
                 type: "refreshEnable",
                 bindingId: binding.id,
                 expected: saved,
                 enabled: !saved.enabled,
               });
-              if (result && token === epoch.current)
+              if (
+                result &&
+                token === epoch.current &&
+                !useApp.getState().saving &&
+                JSON.stringify(useApp.getState().snapshot?.document) ===
+                  documentAtRequest
+              )
                 receive(result as Snapshot);
             }}
           >

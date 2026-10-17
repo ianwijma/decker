@@ -388,9 +388,92 @@ test("five-minute choice, draft validation, inactive copies and current saved en
     .fill("300");
   await page.getByRole("button", { name: "Save refresh", exact: true }).click();
   expect(requests).toBe(0);
+  await app.evaluate(({ ipcMain, BrowserWindow }) => {
+    const handlers = (
+      ipcMain as unknown as {
+        _invokeHandlers: Map<
+          string,
+          (event: unknown, request: unknown) => Promise<unknown>
+        >;
+      }
+    )._invokeHandlers;
+    const original = handlers.get("decker:request")!;
+    const globals = globalThis as typeof globalThis & {
+      refreshPublication?: Promise<void>;
+    };
+    let published!: () => void;
+    globals.refreshPublication = new Promise<void>((resolve) => {
+      published = resolve;
+    });
+    const contents = BrowserWindow.getAllWindows()[0].webContents,
+      send = contents.send.bind(contents);
+    contents.send = (...args: Parameters<typeof contents.send>) => {
+      send(...args);
+      if (
+        args[0] === "decker:snapshot" &&
+        args[1]?.document?.profiles?.[0]?.name === "After activation"
+      )
+        published();
+    };
+
+    let held = false;
+    ipcMain.removeHandler("decker:request");
+    ipcMain.handle(
+      "decker:request",
+      async (event, request: { type?: string }) => {
+        const result = await original(event, request);
+        if (request.type === "refreshEnable" && !held) {
+          held = true;
+          await new Promise<void>((resolve) => {
+            (
+              globalThis as typeof globalThis & {
+                releaseRefreshReply?: () => void;
+              }
+            ).releaseRefreshReply = resolve;
+          });
+        }
+        return result;
+      },
+    );
+  });
   await installClock();
   await enable();
   await lastSuccess();
+  await page.getByText("Manage profile & page", { exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Profile name", exact: true })
+    .fill("After activation");
+  await expect(
+    page.getByText("All changes saved", { exact: true }),
+  ).toBeVisible();
+  await app.evaluate(
+    () =>
+      (globalThis as typeof globalThis & { refreshPublication?: Promise<void> })
+        .refreshPublication,
+  );
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  await app.evaluate(() => {
+    (
+      globalThis as typeof globalThis & { releaseRefreshReply?: () => void }
+    ).releaseRefreshReply?.();
+  });
+  await page.evaluate(async () => {
+    await window.decker.snapshot();
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+  });
+  expect(
+    await page
+      .getByRole("textbox", { name: "Profile name", exact: true })
+      .inputValue(),
+  ).toBe("After activation");
+
   await tick(299);
   expect(requests).toBe(1);
   await tick(1);

@@ -638,7 +638,7 @@ export function Deck() {
               </button>
             )}
             <RefreshEditor
-              key={`${deck.id}:${page.id}:${key.id}`}
+              key={`${deck.id}:${page.id}:${key.id}:${key.generation}:${key.refresh?.id ?? "none"}`}
               binding={key}
               deckId={deck.id}
               openRequested={
