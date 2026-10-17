@@ -6,8 +6,47 @@ on:
 permissions:
   contents: read
 jobs:
-  verify:
-    name: Test and package Linux
+  checks:
+    name: Static checks and unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install native module runtime dependencies
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+  electron:
+    name: Source Electron tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install Linux runtime dependencies
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0 libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libxss1 xvfb xauth
+      - run: npm ci
+      - run: npm run build
+      - name: Electron interaction tests
+        run: xvfb-run --auto-servernum npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-source-test-results
+          path: |
+            test-results/
+            playwright-report/
+  package:
+    name: Package and test Linux installers
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     outputs:
@@ -21,12 +60,6 @@ jobs:
       - name: Install Linux runtime dependencies
         run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0 libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libxss1 xvfb xauth
       - run: npm ci
-      - run: npm run format:check
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-      - name: Electron interaction tests
-        run: xvfb-run --auto-servernum npm run test:e2e
       - name: Compute immutable development build version
         run: |
           export SOURCE_DATE="$(git show -s --format=%cI HEAD)"
@@ -48,7 +81,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: linux-test-results
+          name: linux-packaged-test-results
           path: |
             test-results/
             playwright-report/
@@ -58,6 +91,25 @@ jobs:
           name: decker-linux-x64-${{ github.run_id }}-${{ github.run_attempt }}
           path: release/nightly/
           if-no-files-found: error
+  verify:
+    # Preserve the existing required check and publication gate.
+    name: Test and package Linux
+    needs: [checks, electron, package]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      artifact_id: ${{ needs.package.outputs.artifact_id }}
+    steps:
+      - name: Require all Linux checks to pass
+        env:
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          ELECTRON_RESULT: ${{ needs.electron.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+        run: |
+          test "$CHECKS_RESULT" = success
+          test "$ELECTRON_RESULT" = success
+          test "$PACKAGE_RESULT" = success
   publish:
     name: Publish immutable develop prerelease
     needs: verify

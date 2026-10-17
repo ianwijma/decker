@@ -109,6 +109,8 @@ DECKER_EXECUTABLE=release/linux-unpacked/decker xvfb-run --auto-servernum npm ru
 
 Produces `.deb` and AppImage under `release/`. Both packaging scripts explicitly disable publishing, so CI builds artifacts without requiring `GH_TOKEN` or creating GitHub releases. The lockfile pins stable dependency resolutions. `node-hid` and `sharp` ship ABI-stable Node-API prebuilds, so no Electron header rebuild is needed. Native binaries are unpacked from ASAR; CI loads them from the packaged Electron workers and runs the same UI/runtime smoke tests against the package.
 
+Pull-request and branch CI runs static checks/unit tests, source Electron tests, and Linux packaging/packaged Electron tests in parallel jobs. Source and packaged test reports are uploaded separately. The `Test and package Linux` check requires all three jobs to pass before the same-run installer artifact can be published on a develop push.
+
 See [acceptance coverage and manual checks](docs/ACCEPTANCE.md) for verification boundaries. Physical HID operation, unplug/replug, suspend/resume, Pop!_OS and Wayland session behaviour require host testing; simulator and CI results do not establish those hardware gates. Latency targets in REQUIREMENTS.md remain measurement targets.
 
 The repository is private and does not currently grant an open-source license. Distribution/license intent remains a project-owner decision.
