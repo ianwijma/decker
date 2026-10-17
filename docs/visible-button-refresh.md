@@ -130,6 +130,9 @@ untouched. Startup still loads workspace/display cache before generated-asset GC
 
 ## Working local avatar example
 
+**Use an isolated test workspace. Import replaces the current workspace; export/back up
+existing work before trying it there.** See [temporary workspace setup](development.md).
+
 From the repository, run `node docs/examples/visible-avatar.mjs`. Import
 [visible-avatar.json](examples/visible-avatar.json), review it and confirm import.
 Select the **Local avatar** simulator and its key, then explicitly **Enable
@@ -140,8 +143,8 @@ Fetch image → Update triggering button using `outputs.parse.value.avatar`,
 
 `curl http://127.0.0.1:8743/next` changes its name and avatar. The next minute
 updates the key. `curl http://127.0.0.1:8743/fail` returns HTTP 429 for data fetches;
-the last-good avatar remains, refresh becomes stale and cooldown grows. `/reset`
-restores success. Leave the Deck route to stop simulator work; return to resume
+the last-good avatar remains, refresh becomes stale and cooldown grows. `curl http://127.0.0.1:8743/reset`
+restores success on the next eligible attempt; recovery respects interval/backoff. Leave the Deck route to stop simulator work; return to resume
 under cooldown. Edit the interval to **Every five minutes**, save, then enable to
 use that cadence. No account or physical hardware is required.
 

@@ -82,8 +82,9 @@ dependencies. `configure(document)` reconciles immutable definitions;
 `pause()` invalidates uncertain work on suspend/runner exit; `stop()` is terminal;
 `snapshot()` returns at most 200 public status entries. The process creates one
 instance and at most one timer (a <=1 second heartbeat, independent of the editor,
-active deck/page and tray visibility). This is a service seam for future work;
-PR20 adds no visibility refresh, toggle probing schedule or refresh authority.
+active deck/page and tray visibility). Standalone schedules remain separate from the implemented
+[visible button refresh](visible-button-refresh.md); they have no button authority
+and do not schedule toggle probing.
 
 A schedule owns one pending/active launch. Overlapping ticks skip instead of
 queueing; distinct schedules can overlap. Pending schedule launches are capped at

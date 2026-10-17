@@ -1,6 +1,7 @@
 # Media action contract (PR11)
 
-Document schema stays at v3. Both libraries offer the Media category with
+Current workspace schema is **v7**; these actions originally shipped without a
+migration on v3. Both libraries offer the Media category with
 `media.play`, `media.pause`, `media.playPause`, `media.next`, `media.previous`
 and `media.stop`. They dispatch MPRIS `Play`, `Pause`, `PlayPause`, `Next`,
 `Previous` and `Stop` respectively. Each config is `{ "player": "" }` by default;

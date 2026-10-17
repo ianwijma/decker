@@ -1,6 +1,8 @@
 # Managed secret contract (PR08 / PR09)
 
-Document schema stays at v3. Connections and HTTP actions store only opaque
+Current workspace schema is **v7**; managed secrets originally shipped on v3
+without a migration. See [user-facing security/setup guidance](security.md).
+Connections and HTTP actions store only opaque
 `credentialRef` strings. Existing workspace references, including shared legacy
 references, load unchanged. No API returns stored values to the renderer.
 `Credentials.all()` is exclusively the trusted main-to-runner delivery boundary.

@@ -1,0 +1,202 @@
+{
+  "schemaVersion": 7,
+  "workflowAliases": {},
+  "schedules": [],
+  "profiles": [
+    {
+      "id": "avatar-profile",
+      "name": "Data example",
+      "pages": [
+        {
+          "id": "avatar-page",
+          "name": "Home",
+          "keys": {
+            "0": {
+              "id": "local-avatar-key",
+              "generation": 0,
+              "appearance": {
+                "label": "Fetch local name",
+                "icon": "pack:lucide:v1:user",
+                "background": "#232428",
+                "running": "#5865f2",
+                "success": "#23a559",
+                "error": "#f23f42"
+              },
+              "press": {
+                "kind": "workflow",
+                "workflowId": "c5cc3333-7777-4444-8888-111111111111"
+              },
+              "policy": "ignore",
+              "limit": 4,
+              "longPressMs": 600
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "workflows": [
+    {
+      "id": "c5cc3333-7777-4444-8888-111111111111",
+      "name": "Fetch local name to file",
+      "revision": 1,
+      "inputs": [],
+      "outputs": [],
+      "timeoutMs": 300000,
+      "layout": {
+        "http": {
+          "x": 0,
+          "y": 80
+        },
+        "parse": {
+          "x": 250,
+          "y": 80
+        },
+        "extract": {
+          "x": 500,
+          "y": 80
+        },
+        "write": {
+          "x": 750,
+          "y": 80
+        }
+      },
+      "graph": {
+        "entry": "http",
+        "nodes": [
+          {
+            "id": "http",
+            "name": "http",
+            "kind": "action",
+            "config": {},
+            "action": {
+              "type": "http.request",
+              "version": 1,
+              "config": {
+                "url": "http://127.0.0.1:8743/api",
+                "method": "GET",
+                "body": "",
+                "credentialRef": ""
+              }
+            },
+            "timeoutMs": 30000,
+            "retries": 0,
+            "retrySafe": false
+          },
+          {
+            "id": "parse",
+            "name": "parse",
+            "kind": "action",
+            "config": {},
+            "action": {
+              "type": "data.parseJson",
+              "version": 1,
+              "config": {
+                "input": {
+                  "$ref": "outputs.http"
+                }
+              }
+            },
+            "timeoutMs": 30000,
+            "retries": 0,
+            "retrySafe": false
+          },
+          {
+            "id": "extract",
+            "name": "extract",
+            "kind": "action",
+            "config": {},
+            "action": {
+              "type": "data.extract",
+              "version": 1,
+              "config": {
+                "input": {
+                  "$ref": "outputs.parse.value"
+                },
+                "path": [
+                  "name"
+                ]
+              }
+            },
+            "timeoutMs": 30000,
+            "retries": 0,
+            "retrySafe": false
+          },
+          {
+            "id": "write",
+            "name": "write",
+            "kind": "action",
+            "config": {},
+            "action": {
+              "type": "file.writeText",
+              "version": 1,
+              "config": {
+                "path": "/tmp/decker-data-example.txt",
+                "content": {
+                  "$template": [
+                    "Name: ",
+                    {
+                      "$ref": "outputs.extract.value"
+                    },
+                    "\n"
+                  ]
+                },
+                "createParents": false
+              }
+            },
+            "timeoutMs": 30000,
+            "retries": 0,
+            "retrySafe": false
+          }
+        ],
+        "edges": [
+          {
+            "id": "0",
+            "source": "http",
+            "target": "parse",
+            "port": "next"
+          },
+          {
+            "id": "1",
+            "source": "parse",
+            "target": "extract",
+            "port": "next"
+          },
+          {
+            "id": "2",
+            "source": "extract",
+            "target": "write",
+            "port": "next"
+          }
+        ]
+      }
+    }
+  ],
+  "connections": [],
+  "decks": [
+    {
+      "id": "local-avatar",
+      "name": "Data example",
+      "kind": "simulator",
+      "icon": "\u25a6",
+      "rows": 2,
+      "columns": 3,
+      "brightness": 70,
+      "profileIds": [
+        "avatar-profile"
+      ],
+      "activeProfileId": "avatar-profile",
+      "activePageId": "avatar-page"
+    }
+  ],
+  "activeDeckId": "local-avatar",
+  "settings": {
+    "accent": "#5865f2",
+    "startHidden": false,
+    "launchAtLogin": false,
+    "closeToTray": true,
+    "webEnabled": false,
+    "webPort": 9018,
+    "historyLimit": 200
+  }
+}

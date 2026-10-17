@@ -1,6 +1,7 @@
 # Text file actions (PR17)
 
-Schema v3 is unchanged. Both button and workflow palettes offer version-1
+Current workspace schema is **v7**; text-file actions originally shipped on v3
+without a migration. See the [working data/file example](data-example.md). Both button and workflow palettes offer version-1
 `file.readText` (Read text file), `file.writeText` (Write text file) and
 `file.appendText` (Append text file). Execution uses the normal resolved-action
 handler in the host runtime; there is no filesystem-command IPC API.
