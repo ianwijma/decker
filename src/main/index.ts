@@ -7,6 +7,12 @@ import {
   scheduleError,
 } from "../shared/schedules";
 import { DisplayState, displayObserved } from "./display-state";
+import { RemoteImages } from "./remote-images";
+import { GeneratedAssets } from "./generated-assets";
+import { MainRpc } from "./main-rpc";
+import { authoredAssetReferences } from "../shared/asset-references";
+import { fetchImageSchema } from "../shared/remote-image";
+import { protectSecret } from "../shared/secret-redaction";
 import { captureOrigin, originBinding } from "../shared/trigger-context";
 import {
   app,
@@ -81,6 +87,25 @@ import {
   redactDiagnostics,
   remedyFor,
 } from "../shared/health";
+const remoteImages = new RemoteImages(),
+  mainRpc = new MainRpc();
+let generatedAssets: GeneratedAssets | undefined,
+  collectingAssets = false;
+function collectAssets() {
+  if (!generatedAssets || collectingAssets) return;
+  collectingAssets = true;
+  void enqueueMutation(() => generatedAssets!.collect())
+    .catch(() =>
+      diagnostic(
+        "Generated image cleanup failed; check storage and restart",
+        "generated-assets",
+        "Image storage",
+      ),
+    )
+    .finally(() => {
+      collectingAssets = false;
+    });
+}
 const diagnosticFaults = new DiagnosticFaults();
 protocol.registerSchemesAsPrivileged([
   {
@@ -284,6 +309,7 @@ function deckAppearance(deckId: string) {
       background: appearance.background,
       asset: appearance.asset,
       stateLabel: appearance.stateLabel,
+      imageStatus: appearance.imageStatus,
       toggle: toggleDisplay(
         binding,
         selectToggle(toggleStates, binding, deckId),
@@ -399,6 +425,7 @@ function configure(activateToggles = false) {
   scheduler?.ready(false);
   feedback.reconcile(document);
   displayState?.reconcile();
+  collectAssets();
   for (const key of Object.keys(observed))
     if (
       key.startsWith("obs:") &&
@@ -451,6 +478,7 @@ async function mainAction(
     "deck.appearance",
   ].includes(args[0])
     ? enqueueMutation(async () => {
+        args[2].signal.throwIfAborted();
         // A run can cancel while a credential/document commit holds this queue.
         // Never apply its delayed navigation or brightness after it has settled.
         if (
@@ -474,14 +502,59 @@ async function performMainAction(
     bindingId?: string;
     generation?: number;
     deckId?: string;
+    imageSecret?: string;
+    signal: AbortSignal;
   },
 ): Promise<Json> {
+  context.signal.throwIfAborted();
   const deck = document.decks.find(
     (d) => d.id === (context.deckId ?? document.activeDeckId),
   );
   if (action.startsWith("deck.") && !deck)
     throw new Error("No originating deck selected");
   switch (action) {
+    case "image.fetch": {
+      const cImage = fetchImageSchema.parse(c),
+        ticket = displayState.beginImage(context);
+      try {
+        const value = await remoteImages.fetch(
+          cImage,
+          context.signal,
+          context.imageSecret,
+          (image, signal) =>
+            enqueueMutation(async () => {
+              signal.throwIfAborted();
+              const asset = await generatedAssets!.ingest(
+                image.normalized,
+                context.runId,
+                signal,
+              );
+              signal.throwIfAborted();
+              return {
+                asset,
+                width: 256,
+                height: 256,
+                format: "png",
+                bytes: image.normalized.length,
+                sourceWidth: image.sourceWidth,
+                sourceHeight: image.sourceHeight,
+                sourceFormat: image.sourceFormat,
+              };
+            }),
+        );
+        displayState.imageResult(context, ticket, false);
+        return value;
+      } catch (error) {
+        if (!context.signal.aborted) {
+          displayState.imageResult(context, ticket, true);
+          configureDevice();
+          publish();
+        }
+        return protectSecret(context.imageSecret, async () => {
+          throw error;
+        });
+      }
+    }
     case "desktop.open":
       return openDesktopTarget(action, c.target, shell);
     case "desktop.openUrl":
@@ -526,6 +599,7 @@ async function performMainAction(
     }
     case "deck.appearance": {
       await displayState.commit(c, context);
+      collectAssets();
       configureDevice();
       publish();
       return null;
@@ -630,6 +704,8 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         message.type === "scheduleSettled"
       ) {
         scheduledRunner.message(message);
+      } else if (message.type === "cancelMainAction") {
+        mainRpc.cancel(child, message.id, message.runId, message.actionId);
       } else if (message.type === "displayInvocation") {
         if (message.operation === "begin")
           displayState.begin(message.authority, message.runId);
@@ -670,6 +746,11 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
       } else if (message.type === "run") {
         const record = message.record as RunRecord,
           index = runs.findIndex((r) => r.id === record.id);
+        if (record.status !== "running") {
+          mainRpc.invalidate(child, record.id);
+          generatedAssets?.release(record.id);
+          collectAssets();
+        }
         if (index >= 0) runs[index] = record;
         else runs.push(record);
         const active = runs.filter((r) => r.status === "running"),
@@ -711,18 +792,28 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         diagnostic(message.error, `worker:${name}`, `${name} service`);
       else if (message.type === "mainAction") {
         try {
-          const value = await mainAction(
-            message.action,
-            message.config,
-            message.context,
+          const signal = mainRpc.begin(
+            child,
+            message.id,
+            message.context.runId,
+            message.context.actionId,
           );
-          post("runner", { type: "reply", id: message.id, value });
-        } catch (error) {
-          post("runner", {
-            type: "reply",
-            id: message.id,
-            error: String(error),
+          const value = await mainAction(message.action, message.config, {
+            ...message.context,
+            signal,
           });
+          signal.throwIfAborted();
+          if (workers.get(name)?.process === child)
+            child.postMessage({ type: "reply", id: message.id, value });
+        } catch (error) {
+          if (workers.get(name)?.process === child)
+            child.postMessage({
+              type: "reply",
+              id: message.id,
+              error: String(error),
+            });
+        } finally {
+          mainRpc.finish(child, message.id);
         }
       }
     } catch (error) {
@@ -737,6 +828,11 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
     );
   });
   child.on("exit", (code) => {
+    mainRpc.invalidate(child);
+    if (name === "runner") {
+      generatedAssets?.release();
+      collectAssets();
+    }
     workers.delete(name);
     if (quitting) return;
     if (name === "device") {
@@ -994,6 +1090,7 @@ async function handleRequest(request: Request) {
       return null;
     }
     case "cancel":
+      mainRpc.invalidate(undefined, request.runId);
       displayState.cancelRun(request.runId);
       post("runner", { type: "cancel", id: request.runId });
       return null;
@@ -1259,6 +1356,9 @@ async function handleRequest(request: Request) {
       triggers.disconnect();
       scheduler?.pause();
       displayState.invalidate();
+      mainRpc.invalidate();
+      generatedAssets?.release();
+      collectAssets();
       for (const r of runs.filter((r) => r.status === "running"))
         post("runner", { type: "cancel", id: r.id });
 
@@ -1364,6 +1464,16 @@ if (locked)
       () => Object.values(credentials?.all() ?? {}),
     );
     await displayState.load();
+    generatedAssets = new GeneratedAssets(
+      app.getPath("userData"),
+      store.assetDirectory,
+      () => authoredAssetReferences(document),
+      () => displayState.assetReferences(),
+    );
+    store.promoteAssets = (hashes) => generatedAssets!.promote(hashes);
+    store.authorAsset = (hashes, publish) =>
+      generatedAssets!.author(hashes, publish);
+    await generatedAssets.load();
     credentials = new Credentials(app.getPath("userData"));
     await credentials.load();
     if (loaded.warning)
@@ -1443,6 +1553,8 @@ app.on("before-quit", (event) => {
   obsTests.close();
   triggers.disconnect();
   displayState?.invalidate();
+  mainRpc.invalidate();
+  generatedAssets?.release();
   for (const name of workers.keys()) post(name, { type: "stop" });
   clearTimeout(persistTimer);
   setTimeout(() => {

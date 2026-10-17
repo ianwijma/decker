@@ -18,9 +18,14 @@ export class Images {
     const label = escape(appearance.label.slice(0, 24)),
       icon = escape(appearance.icon.slice(0, 4)),
       pack = packKeySvg(appearance.icon, appearance.label);
-    const state = appearance.stateLabel
-      ? `<rect width="100%" height="18%" fill="#000000" opacity=".8"/><text x="50%" y="13%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.08}" fill="white">${escape(appearance.stateLabel)}</text>`
-      : "";
+    const imageStatus =
+      appearance.imageStatus === "stale"
+        ? `<text x="50%" y="28%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.08}" fill="white">Image stale</text>`
+        : "";
+    const state =
+      (appearance.stateLabel
+        ? `<rect width="100%" height="18%" fill="#000000" opacity=".8"/><text x="50%" y="13%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.08}" fill="white">${escape(appearance.stateLabel)}</text>`
+        : "") + imageStatus;
     const svg = Buffer.from(
       `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><rect width="100%" height="100%" fill="${appearance.background}"/>${state}${pack ?? `<text x="50%" y="43%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.3}" fill="white">${icon}</text><text x="50%" y="80%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.12}" fill="white">${label}</text>`}</svg>`,
     );

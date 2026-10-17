@@ -24,7 +24,7 @@ export function ActionSecret({
       label="Bearer token"
     />
   ) : (
-    <p className="muted">Save this HTTP action to enter its bearer token.</p>
+    <p className="muted">Save this action to enter its bearer token.</p>
   );
 }
 
@@ -133,13 +133,13 @@ export function InlineSecret({
   );
 }
 
-// Every supported HTTP owner (including nested graphs) remains reachable here.
+// Every bearer owner (including image actions and nested graphs) is reachable.
 export function ActionSecretOwners() {
   const owners = useApp((state) => state.snapshot?.document);
   return (
     owners && (
       <details>
-        <summary>HTTP action secrets</summary>
+        <summary>Action bearer tokens</summary>
         {credentialOwners(owners)
           .filter((o) => o.action)
           .map((o) => (

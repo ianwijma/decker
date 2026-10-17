@@ -177,22 +177,34 @@ describe("scope and presentation contract", () => {
       if (def.id === "data.parseJson" || def.id === "data.extract")
         expect(output.fields).toEqual({ value: "JSON" });
       if (output.type === "object" || output.type === "HTTP result") {
-        const sample = Object.fromEntries(
-          Object.entries(output.fields).map(([key, type]) => [
-            key,
-            key === "operation" && def.id.startsWith("file.")
-              ? def.id === "file.appendText"
-                ? "append"
-                : "overwrite"
-              : type === "number"
-                ? 0
-                : type === "boolean"
-                  ? false
-                  : type === "text"
-                    ? ""
-                    : null,
-          ]),
-        );
+        const sample =
+          def.id === "image.fetch"
+            ? {
+                asset: "a".repeat(64),
+                width: 256,
+                height: 256,
+                format: "png",
+                bytes: 100,
+                sourceWidth: 8,
+                sourceHeight: 6,
+                sourceFormat: "jpeg",
+              }
+            : Object.fromEntries(
+                Object.entries(output.fields).map(([key, type]) => [
+                  key,
+                  key === "operation" && def.id.startsWith("file.")
+                    ? def.id === "file.appendText"
+                      ? "append"
+                      : "overwrite"
+                    : type === "number"
+                      ? 0
+                      : type === "boolean"
+                        ? false
+                        : type === "text"
+                          ? ""
+                          : null,
+                ]),
+              );
         expect(def.outputSchema.safeParse(sample).success).toBe(true);
       }
     }

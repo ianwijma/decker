@@ -213,6 +213,11 @@ Reset/eviction releases only dynamic references; this service never deletes an
 uploaded file. PR22 still owns remote downloading, authoritative raster ingestion
 and generated-asset retention budgets.
 
+PR22 implements those seams in [Bounded remote image assets](remote-image-assets.md),
+including per-root production leases, permanent authored promotion, complete
+workflow asset export and transient per-button `imageStatus` with authority-bound
+request tickets for PR23. Display authority and this cache format are unchanged.
+
 ## Working local example and verification
 
 Connect HTTP request → Parse JSON → Extract → Update triggering button. For an

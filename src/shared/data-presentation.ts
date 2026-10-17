@@ -32,6 +32,16 @@ export type DataChoice = {
 export const choiceId = (choice: Pick<DataChoice, "path">) =>
   JSON.stringify(choice.path);
 const outputFields: Record<string, Record<string, DataType>> = {
+  "image.fetch": {
+    asset: "text",
+    width: "number",
+    height: "number",
+    format: "text",
+    bytes: "number",
+    sourceWidth: "number",
+    sourceHeight: "number",
+    sourceFormat: "text",
+  },
   "file.readText": { text: "text", bytes: "number", truncated: "boolean" },
   "file.writeText": {
     bytesWritten: "number",
