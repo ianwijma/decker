@@ -195,6 +195,11 @@ test("Web decks retains sharing and pairing approval controls", async () => {
   await app.evaluate(({ BrowserWindow, ipcMain }, serialized) => {
     const context = globalThis as unknown as { settingsApprovals: unknown[] };
     context.settingsApprovals = [];
+    const snapshot = JSON.parse(serialized);
+    // Own both read and publication paths: a late startup/worker snapshot must
+    // not replace synthetic pairing evidence while these controls are exercised.
+    ipcMain.removeHandler("decker:snapshot");
+    ipcMain.handle("decker:snapshot", () => snapshot);
     ipcMain.removeHandler("decker:request");
     ipcMain.handle("decker:request", (_event, request) => {
       context.settingsApprovals.push(request);
@@ -203,10 +208,16 @@ test("Web decks retains sharing and pairing approval controls", async () => {
     const contents = BrowserWindow.getAllWindows()[0].webContents;
     const send = contents.send.bind(contents);
     contents.send = (channel, ...args) => {
-      if (channel !== "decker:snapshot") send(channel, ...args);
+      if (channel === "decker:snapshot") send(channel, snapshot);
+      else send(channel, ...args);
     };
-    send("decker:snapshot", JSON.parse(serialized));
+    send("decker:snapshot", snapshot);
   }, JSON.stringify(fixture));
+  expect(
+    await page.evaluate(async () =>
+      (await window.decker.snapshot()).web.pending.map((p) => p.code),
+    ),
+  ).toEqual(["123456"]);
   await page.getByRole("button", { name: "Web decks", exact: true }).click();
   await expectSelected("Web decks");
   await expect(
