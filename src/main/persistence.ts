@@ -1,4 +1,7 @@
 import { targetWorkflow } from "../runtime/targets";
+import { authoredAssetReferences } from "../shared/asset-references";
+import { constants, linkSync } from "node:fs";
+import { open, unlink } from "node:fs/promises";
 import { bindingTargets } from "../shared/binding-targets";
 import { rekeyCredentials } from "../shared/credential-owners";
 import { randomUUID } from "node:crypto";
@@ -183,6 +186,12 @@ export function validateImport(value: unknown): AppDocument {
   return doc;
 }
 export class Persistence {
+  /** Ownership promotion precedes any durable authored adoption. */
+  promoteAssets?: (hashes: Set<string>) => Promise<void>;
+  authorAsset?: (
+    hashes: Set<string>,
+    publish: () => Promise<string>,
+  ) => Promise<string>;
   private pending = Promise.resolve();
   private loadFailure?: string;
   readonly assetDirectory: string;
@@ -256,7 +265,8 @@ export class Persistence {
   }
   save(document: AppDocument, runs: RunRecord[]) {
     if (this.loadFailure) return Promise.reject(new Error(this.loadFailure));
-    const config = JSON.stringify(validateDocument(document), null, 2);
+    const config = JSON.stringify(validateDocument(document), null, 2),
+      assetReferences = authoredAssetReferences(document);
     const retained = runs.slice(-document.settings.historyLimit);
     while (JSON.stringify(retained).length > 4_000_000 && retained.length > 1)
       retained.shift();
@@ -264,6 +274,7 @@ export class Persistence {
     const operation = this.pending
       .catch(() => {})
       .then(async () => {
+        await this.promoteAssets?.(assetReferences);
         // Commit the owner document last: a history failure must not commit a
         // credential reference while reporting that its transaction failed.
         await this.atomic("history.json", history);
@@ -280,24 +291,61 @@ export class Persistence {
   async storeAsset(bytes: Buffer) {
     if (bytes.length > 5_000_000) throw new Error("Image exceeds 5 MB");
     const hash = createHash("sha256").update(bytes).digest("hex");
-    await writeFile(join(this.assetDirectory, hash), bytes, { mode: 0o600 });
+    const publish = () => this.publishAsset(hash, bytes);
+    if (this.authorAsset) return this.authorAsset(new Set([hash]), publish);
+    await this.promoteAssets?.(new Set([hash]));
+    return publish();
+  }
+  private async publishAsset(hash: string, bytes: Buffer): Promise<string> {
+    const path = join(this.assetDirectory, hash),
+      temporary = join(this.assetDirectory, `.upload-${randomUUID()}.tmp`);
+    try {
+      const existing = await open(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const stat = await existing.stat();
+        const buffer = Buffer.alloc(bytes.length + 1);
+        const read =
+          stat.isFile() && stat.size === bytes.length
+            ? await existing.read(buffer, 0, buffer.length, 0)
+            : undefined;
+        if (
+          !stat.isFile() ||
+          stat.size !== bytes.length ||
+          read?.bytesRead !== bytes.length ||
+          !buffer.subarray(0, bytes.length).equals(bytes)
+        )
+          throw new Error("Asset checksum mismatch");
+        return hash;
+      } finally {
+        await existing.close();
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    try {
+      const file = await open(temporary, "wx", 0o600);
+      try {
+        await file.writeFile(bytes);
+        await file.sync();
+      } finally {
+        await file.close();
+      }
+      try {
+        linkSync(temporary, path);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        return this.publishAsset(hash, bytes);
+      }
+    } finally {
+      await unlink(temporary).catch(() => {});
+    }
     return hash;
   }
   async export(document: AppDocument) {
-    const hashes = new Set([
-      ...document.decks.flatMap((deck) => (deck.asset ? [deck.asset] : [])),
-      ...document.profiles.flatMap((p) =>
-        p.pages.flatMap((page) =>
-          Object.values(page.keys).flatMap((k) =>
-            [
-              k.appearance.asset,
-              k.toggle?.appearance?.on?.asset,
-              k.toggle?.appearance?.off?.asset,
-            ].filter((hash): hash is string => typeof hash === "string"),
-          ),
-        ),
-      ),
-    ]);
+    const hashes = authoredAssetReferences(document);
     const assets: Record<string, string> = {};
     for (const hash of hashes)
       assets[hash] = (await readFile(join(this.assetDirectory, hash))).toString(

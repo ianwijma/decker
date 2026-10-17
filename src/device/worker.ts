@@ -62,7 +62,10 @@ const frameSchema = z.object({
   brightness: z.number().int().min(0).max(100),
   page: z.record(
     z.string(),
-    appearanceSchema.extend({ stateLabel: z.string().max(40).optional() }),
+    appearanceSchema.extend({
+      stateLabel: z.string().max(40).optional(),
+      imageStatus: z.literal("stale").optional(),
+    }),
   ),
 });
 const schema = z.discriminatedUnion("type", [

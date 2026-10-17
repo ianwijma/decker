@@ -210,3 +210,13 @@ footer {
   font-size: clamp(8px, 1.6vw, 12px);
   line-height: 1.2;
 }
+.key .image-status {
+  position: absolute;
+  z-index: 2;
+  top: 22%;
+  left: 4px;
+  right: 4px;
+  background: #000d;
+  color: #fff;
+  font-size: clamp(8px, 1.6vw, 12px);
+}

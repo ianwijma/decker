@@ -45,6 +45,11 @@ export const DISPLAY_LIMITS = {
  * Public IDs never confer authority; tokens are issued only by trusted launch paths.
  */
 export class DisplayState {
+  private imageTickets = new Map<
+    string,
+    { origin: ButtonOrigin; ticket: number; stale: boolean }
+  >();
+  private imageSequence = 0;
   private entries = new Map<string, Entry>();
   private authorities = new Map<string, Authority>();
   private owners = new Map<string, number>();
@@ -137,6 +142,9 @@ export class DisplayState {
     this.owners.clear();
   }
   reconcile() {
+    for (const [key, status] of this.imageTickets)
+      if (!originBinding(this.current(), status.origin))
+        this.imageTickets.delete(key);
     for (const [token, a] of this.authorities)
       if (!a.source.origin || this.stamp(a.source.origin) !== a.stamp)
         this.end(token);
@@ -229,6 +237,50 @@ export class DisplayState {
       throw new Error("Triggering button invocation is stale or superseded");
     return a;
   }
+  /** PR23 seam: bounded transient image status, independent of toggle/activity.
+   * Tickets and existing authority stop old failures overwriting newer success. */
+  beginImage(context: {
+    authority?: string;
+    runId?: string;
+    actionId?: string;
+  }) {
+    try {
+      const a = this.validate(
+          context.authority,
+          context.runId,
+          context.actionId,
+        ),
+        origin = a.source.origin!,
+        key = originKey(origin),
+        ticket = ++this.imageSequence;
+      const stale = this.imageTickets.get(key)?.stale ?? false;
+      this.imageTickets.delete(key);
+      this.imageTickets.set(key, { origin, ticket, stale });
+      while (this.imageTickets.size > this.limits.entries)
+        this.imageTickets.delete(this.imageTickets.keys().next().value!);
+      return ticket;
+    } catch {
+      return undefined;
+    } // Unbound fetching is intentionally allowed.
+  }
+  imageResult(
+    context: { authority?: string; runId?: string; actionId?: string },
+    ticket: number | undefined,
+    stale: boolean,
+  ) {
+    if (ticket === undefined) return;
+    try {
+      const a = this.validate(
+          context.authority,
+          context.runId,
+          context.actionId,
+        ),
+        status = this.imageTickets.get(originKey(a.source.origin!));
+      if (status?.ticket === ticket) status.stale = stale;
+    } catch {
+      /* Cancelled/stale/superseded requests publish no status. */
+    }
+  }
   async commit(
     raw: unknown,
     context: { authority?: string; runId?: string; actionId?: string },
@@ -301,6 +353,8 @@ export class DisplayState {
         closeSync(directory);
       }
       this.entries = next;
+      if (patch.asset !== undefined || patch.reset?.includes("asset"))
+        this.imageTickets.delete(key);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code) this.blocked = true;
       throw error;
@@ -319,7 +373,7 @@ export class DisplayState {
   }
   snapshot(): Record<string, Json> {
     this.reconcile();
-    return Object.fromEntries(
+    const result: Record<string, Json> = Object.fromEntries(
       [...this.entries.values()].map((e) => [
         activityKey(e.origin.deckId, {
           id: e.origin.bindingId,
@@ -344,6 +398,18 @@ export class DisplayState {
         },
       ]),
     );
+    for (const status of this.imageTickets.values())
+      if (status.stale) {
+        const key = activityKey(status.origin.deckId, {
+          id: status.origin.bindingId,
+          generation: status.origin.generation,
+        });
+        result[key] = {
+          ...(result[key] as Record<string, Json> | undefined),
+          imageStatus: "stale",
+        };
+      }
+    return result;
   }
 }
 

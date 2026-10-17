@@ -1,4 +1,9 @@
 import { displayActionSchema } from "./display-contract";
+import {
+  fetchImageSchema,
+  fetchImageOutputSchema,
+  IMAGE_LIMITS,
+} from "./remote-image";
 import { z } from "zod";
 import { decodeArgs } from "./data-contract";
 import {
@@ -77,6 +82,52 @@ const definitions: Omit<
   ActionDefinition,
   "version" | "schema" | "inputSchema" | "outputSchema"
 >[] = [
+  {
+    id: "image.fetch",
+    name: "Fetch image",
+    group: "Developer",
+    icon: "▧",
+    description:
+      "Fetch a bounded static image to a local asset. Bind its asset output to Update triggering button.",
+    capabilities: [],
+    paletteContexts: ["workflow"],
+    fields: [
+      f("url", "Image URL", "https://example.com/avatar.png"),
+      {
+        ...f(
+          "maxBytes",
+          "Maximum download bytes",
+          IMAGE_LIMITS.inputBytes,
+          "number",
+        ),
+        hint: "1–4,194,304 bytes (4 MiB). Decompressed response bytes are counted.",
+      },
+      {
+        ...f(
+          "maxPixels",
+          "Maximum decoded pixels",
+          IMAGE_LIMITS.pixels,
+          "number",
+        ),
+        hint: "1–16,000,000 pixels.",
+      },
+      {
+        ...f(
+          "timeoutMs",
+          "Image deadline (ms)",
+          IMAGE_LIMITS.timeoutMs,
+          "number",
+        ),
+        hint: "100–15,000 ms, including queue, redirects, download and decode.",
+      },
+      {
+        ...f("credentialRef", "Bearer token", "", "secret"),
+        optional: true,
+        hint: "Optional managed token. Never inherited from another action; dropped permanently on a cross-origin redirect.",
+      },
+    ],
+    idempotent: true,
+  },
   {
     id: "app.launch",
     name: "Launch application",
@@ -509,6 +560,7 @@ export const catalog: ActionDefinition[] = definitions.map((d) => {
             ),
           );
   if (d.id === "deck.appearance") schema = displayActionSchema;
+  if (d.id === "image.fetch") schema = fetchImageSchema;
   if (d.id === "file.readText") schema = readTextFileSchema;
   if (d.id === "file.writeText" || d.id === "file.appendText")
     schema = mutateTextFileSchema;
@@ -520,22 +572,24 @@ export const catalog: ActionDefinition[] = definitions.map((d) => {
     schema,
     inputSchema: schema,
     outputSchema:
-      d.id === "file.readText"
-        ? readTextFileOutputSchema
-        : d.id === "file.writeText" || d.id === "file.appendText"
-          ? mutateTextFileOutputSchema
-          : d.id === "deck.brightnessIncrease" ||
-              d.id === "deck.brightnessDecrease"
-            ? brightnessValueSchema
-            : d.id === "http.request"
-              ? httpOutputSchema
-              : d.id === "data.parseJson" || d.id === "data.extract"
-                ? valueOutputSchema
-                : d.id === "command.run" || d.id === "command.shell"
-                  ? commandOutputSchema
-                  : d.id === "app.launch"
-                    ? z.object({ pid: z.number().int() })
-                    : z.unknown(),
+      d.id === "image.fetch"
+        ? fetchImageOutputSchema
+        : d.id === "file.readText"
+          ? readTextFileOutputSchema
+          : d.id === "file.writeText" || d.id === "file.appendText"
+            ? mutateTextFileOutputSchema
+            : d.id === "deck.brightnessIncrease" ||
+                d.id === "deck.brightnessDecrease"
+              ? brightnessValueSchema
+              : d.id === "http.request"
+                ? httpOutputSchema
+                : d.id === "data.parseJson" || d.id === "data.extract"
+                  ? valueOutputSchema
+                  : d.id === "command.run" || d.id === "command.shell"
+                    ? commandOutputSchema
+                    : d.id === "app.launch"
+                      ? z.object({ pid: z.number().int() })
+                      : z.unknown(),
   };
 });
 export const actionById = (id: string) => catalog.find((d) => d.id === id);

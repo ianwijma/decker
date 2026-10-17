@@ -1,9 +1,10 @@
 import { DisplayState } from "../src/main/display-state";
+import { GeneratedAssets } from "../src/main/generated-assets";
+import { normalizeImage } from "../src/main/remote-images";
 import { defaults, uid } from "../src/shared/defaults";
 import { captureOrigin } from "../src/shared/trigger-context";
 import { buttonAppearance } from "../src/shared/feedback";
 import { Images } from "../src/device/images";
-import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { it, expect, afterEach, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
@@ -391,13 +392,13 @@ it("authorizes resolved dynamic assets per deck and preserves desktop/web/frame 
     deck = document.decks[0],
     binding = document.profiles[0].pages[0].keys[0];
   deck.id = "tablet";
-  const bytes = await sharp({
-      create: { width: 4, height: 4, channels: 3, background: "#123456" },
-    })
-      .png()
-      .toBuffer(),
-    hash = createHash("sha256").update(bytes).digest("hex");
-  await writeFile(join(f.directory, hash), bytes);
+  const source = await sharp({
+    create: { width: 4, height: 4, channels: 3, background: "#123456" },
+  })
+    .png()
+    .toBuffer();
+  const bytes = (await normalizeImage(source, new AbortController().signal))
+    .normalized;
   const display = new DisplayState(f.directory, f.directory, () => document),
     launch = display.accept(
       "button",
@@ -407,9 +408,33 @@ it("authorizes resolved dynamic assets per deck and preserves desktop/web/frame 
     actionId = uid();
   display.begin(launch.authority!, runId);
   display.action(launch.authority!, runId, actionId, true);
+  const generated = new GeneratedAssets(
+    f.directory,
+    f.directory,
+    () => new Set(),
+    () => display.assetReferences(),
+  );
+  await generated.load();
+  const hash = await generated.ingest(
+    bytes,
+    runId,
+    new AbortController().signal,
+  );
   await display.commit(
     { label: "Fetched 0", icon: "pack:lucide:v1:user", asset: hash },
     { authority: launch.authority, runId, actionId },
+  );
+  generated.release(runId);
+  await generated.collect();
+  const ticket = display.beginImage({
+    authority: launch.authority,
+    runId,
+    actionId,
+  });
+  display.imageResult(
+    { authority: launch.authority, runId, actionId },
+    ticket,
+    true,
   );
   const desktop = buttonAppearance(
     binding,
@@ -426,6 +451,7 @@ it("authorizes resolved dynamic assets per deck and preserves desktop/web/frame 
           background: desktop.background,
           icon: desktop.icon,
           asset: desktop.asset,
+          imageStatus: desktop.imageStatus,
         },
       },
     },
@@ -438,6 +464,7 @@ it("authorizes resolved dynamic assets per deck and preserves desktop/web/frame 
   expect(payload.view.keys[0]).toMatchObject({
     label: "Fetched 0",
     asset: hash,
+    imageStatus: "stale",
   });
   expect(JSON.stringify(connection.messages)).not.toMatch(
     /authority|invocationId|buttonDisplay|outputs/,
