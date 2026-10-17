@@ -652,3 +652,36 @@ it("keeps reconciled state through workflow rename/layout saves and invalidates 
   await h.service.reconcile(deckId, b.id);
   expect(h.state()).toMatchObject({ confirmed: "on", fresh: true });
 });
+
+it("refresh definition and activation edits neither reconcile nor cancel a pending toggle transition", async () => {
+  const { doc, b, deckId } = fixture();
+  let release!: () => void;
+  const h = harness(doc, async () => {
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return null;
+  });
+  await h.service.settled();
+  const press = h.service.press(deckId, b);
+  await vi.waitFor(() => expect(h.state().transitioning).toBe(true));
+  const calls = h.storage.mock.calls.length;
+  b.refresh = {
+    id: uid(),
+    workflowId: doc.workflows[0].id,
+    inputs: {},
+    seconds: 60,
+    initial: true,
+    enabled: false,
+  };
+  h.service.configure(doc);
+  b.refresh.seconds = 300;
+  b.refresh.enabled = true;
+  h.service.configure(doc);
+  expect(h.state()).toMatchObject({ confirmed: "off", transitioning: true });
+  expect(h.storage.mock.calls).toHaveLength(calls);
+  release();
+  await press;
+  expect(h.state()).toMatchObject({ confirmed: "on", transitioning: false });
+  h.service.stop();
+});

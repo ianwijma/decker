@@ -480,6 +480,24 @@ export function Catalog({ onPick }: { onPick: (type: string) => void }) {
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
+      {"dynamic workflow button refresh data".includes(
+        search.toLowerCase(),
+      ) && (
+        <button
+          className="catalog-action"
+          aria-label="Dynamic workflow button"
+          draggable
+          onDragStart={(e) =>
+            e.dataTransfer.setData("decker/action", "preset.dynamic-workflow")
+          }
+          onClick={() => onPick("preset.dynamic-workflow")}
+          title="Configure a separate refresh workflow; keeps existing press and toggle assignments"
+        >
+          <span>↻</span>
+          <span>Dynamic workflow button</span>
+          <Plus size={13} />
+        </button>
+      )}
       {["Developer", "Desktop", "Media", "Streaming", "Deck"].map((group) => (
         <div key={group} className="catalog-group">
           <h3>{group}</h3>

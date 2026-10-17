@@ -1,3 +1,8 @@
+import {
+  refreshSchema,
+  MAX_REFRESH_BINDINGS,
+  type RefreshState,
+} from "./refresh";
 import { scheduleSchema, MAX_SCHEDULES, type ScheduleState } from "./schedules";
 import {
   executionContextSchema,
@@ -260,8 +265,14 @@ const rejectPhases = (
 const v4BindingSchema = v3BindingSchema
   .extend({ toggle: v4ToggleSchema.optional() })
   .superRefine(rejectPhases);
-export const bindingSchema = v3BindingSchema
+const v6BindingSchema = v3BindingSchema
   .extend({ toggle: toggleSchema.optional() })
+  .superRefine(rejectPhases);
+export const bindingSchema = v3BindingSchema
+  .extend({
+    toggle: toggleSchema.optional(),
+    refresh: refreshSchema.optional(),
+  })
   .superRefine(rejectPhases);
 export type KeyBinding = z.infer<typeof bindingSchema>;
 const v3PageSchema = z.object({
@@ -423,13 +434,29 @@ export const v4DocumentSchema = documentObjectSchema
 export const v5DocumentSchema = documentObjectSchema
   .extend({
     schemaVersion: z.literal(5),
-    profiles: z.array(profileSchema).max(200),
+    profiles: z
+      .array(
+        v3ProfileSchema.extend({
+          pages: z
+            .array(
+              v3PageSchema.extend({
+                keys: z.record(
+                  z.string().regex(/^\d{1,3}$/),
+                  v6BindingSchema.strict(),
+                ),
+              }),
+            )
+            .min(1)
+            .max(100),
+        }),
+      )
+      .max(200),
   })
   .superRefine(validateAliases);
-export const documentSchema = documentObjectSchema
+export const v6DocumentSchema = documentObjectSchema
   .extend({
     schemaVersion: z.literal(6),
-    profiles: z.array(profileSchema).max(200),
+    profiles: v5DocumentSchema.shape.profiles,
     schedules: z.array(scheduleSchema).max(MAX_SCHEDULES).default([]),
   })
   .superRefine((doc, ctx) => {
@@ -439,6 +466,34 @@ export const documentSchema = documentObjectSchema
         code: "custom",
         path: ["schedules"],
         message: "Schedule IDs must be unique",
+      });
+  });
+export const documentSchema = z
+  .object({
+    ...v6DocumentSchema.shape,
+    schemaVersion: z.literal(7),
+    profiles: z.array(profileSchema).max(200),
+  })
+  .superRefine((doc, ctx) => {
+    validateAliases(doc, ctx);
+    if (new Set(doc.schedules.map((s) => s.id)).size !== doc.schedules.length)
+      ctx.addIssue({
+        code: "custom",
+        path: ["schedules"],
+        message: "Schedule IDs must be unique",
+      });
+    const refreshes = doc.profiles.flatMap((p) =>
+      p.pages.flatMap((page) =>
+        Object.values(page.keys).flatMap((b) => (b.refresh ? [b.refresh] : [])),
+      ),
+    );
+    if (
+      refreshes.length > MAX_REFRESH_BINDINGS ||
+      new Set(refreshes.map((r) => r.id)).size !== refreshes.length
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Refresh definitions must be unique, at most 64",
       });
   });
 export type AppDocument = z.infer<typeof documentSchema>;
@@ -489,6 +544,7 @@ export type DeviceStatus = {
   configured: boolean;
   state: DeviceState;
   updatedAt: number;
+  appliedView?: string;
   // Completion of a driver write, not physical display readback.
   lastSuccessfulWriteAt?: number;
   errorDetails?: {
@@ -518,6 +574,8 @@ export type CredentialStatus =
 export type Snapshot = {
   document: AppDocument;
   schedules?: ScheduleState[];
+  refresh?: RefreshState[];
+  viewVersions?: Record<string, string>;
   toggles?: import("./toggle-contract").ToggleState[];
   runs: RunRecord[];
   devices: DeviceStatus[];
@@ -533,6 +591,22 @@ export type Snapshot = {
   web: WebStatus;
 };
 export const requestSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("refreshEnable"),
+      bindingId: id,
+      expected: refreshSchema,
+      enabled: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("simulatorVisible"),
+      deckId: id,
+      version: z.string().max(200),
+      visible: z.boolean(),
+    })
+    .strict(),
   z
     .object({
       type: z.literal("scheduleEnable"),
@@ -696,6 +770,7 @@ export const runRecordSchema: z.ZodType<RunRecord> = z.object({
 export type WebKey = {
   stateLabel?: string;
   imageStatus?: "stale";
+  refreshStatus?: string;
   toggle?: import("./toggle-presentation").ToggleDisplay;
   label: string;
   icon: string;

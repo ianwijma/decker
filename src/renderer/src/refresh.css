@@ -1,0 +1,24 @@
+.refresh-editor {
+  border-top: 1px solid #45464d;
+  margin-top: 16px;
+  padding-top: 12px;
+}
+.refresh-editor p {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #c4c5ca;
+}
+.refresh-draft {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.refresh-status {
+  position: absolute;
+  top: 28%;
+  left: 0;
+  width: 100%;
+  background: #000b;
+  color: white;
+  font-size: 9px;
+}

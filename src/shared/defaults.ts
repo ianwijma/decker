@@ -43,7 +43,7 @@ export function defaults(): AppDocument {
   delay.config = { ms: 400 };
   done.config = { status: "Ready to create" };
   return documentSchema.parse({
-    schemaVersion: 6,
+    schemaVersion: 7,
     schedules: [],
     workflowAliases: {},
     profiles: [

@@ -229,7 +229,7 @@ test("authors, previews, explicitly enables, runs unbound and edits/disables/del
   const saved = JSON.parse(
     await readFile(join(directory, "config.json"), "utf8"),
   );
-  expect(saved.schemaVersion).toBe(6);
+  expect(saved.schemaVersion).toBe(7);
   expect(saved.schedules[0].enabled).toBe(false);
 });
 test("resumes only enabled saved schedules after readiness, works with the window closed to tray and skips suspend time", async () => {

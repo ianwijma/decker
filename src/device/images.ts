@@ -22,10 +22,15 @@ export class Images {
       appearance.imageStatus === "stale"
         ? `<text x="50%" y="28%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.08}" fill="white">Image stale</text>`
         : "";
+    const refreshStatus = appearance.refreshStatus
+      ? `<text x="50%" y="39%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.08}" fill="white">${escape(appearance.refreshStatus)}</text>`
+      : "";
     const state =
       (appearance.stateLabel
         ? `<rect width="100%" height="18%" fill="#000000" opacity=".8"/><text x="50%" y="13%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.08}" fill="white">${escape(appearance.stateLabel)}</text>`
-        : "") + imageStatus;
+        : "") +
+      imageStatus +
+      refreshStatus;
     const svg = Buffer.from(
       `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><rect width="100%" height="100%" fill="${appearance.background}"/>${state}${pack ?? `<text x="50%" y="43%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.3}" fill="white">${icon}</text><text x="50%" y="80%" text-anchor="middle" font-family="sans-serif" font-size="${size * 0.12}" fill="white">${label}</text>`}</svg>`,
     );

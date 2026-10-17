@@ -746,7 +746,7 @@ describe("v6 persistence, activation and high-water marks", () => {
             }
           : { ...(version === 2 ? old : d), schemaVersion: version };
       expect(migrateDocument(value)).toMatchObject({
-        schemaVersion: 6,
+        schemaVersion: defaults().schemaVersion,
         schedules: [],
       });
     },
@@ -781,12 +781,12 @@ describe("v6 persistence, activation and high-water marks", () => {
       expect(JSON.stringify(exported)).not.toContain("nextAt");
       const future = JSON.stringify({
         ...d,
-        schemaVersion: 7,
+        schemaVersion: defaults().schemaVersion + 1,
         untouched: true,
       });
       await writeFile(join(directory, "config.json"), future);
       expect((await store.load()).warning).toContain(
-        "Unsupported schema version 7",
+        `Unsupported schema version ${defaults().schemaVersion + 1}`,
       );
       await expect(store.save(d, [])).rejects.toThrow("blocked");
       expect(await readFile(join(directory, "config.json"), "utf8")).toBe(

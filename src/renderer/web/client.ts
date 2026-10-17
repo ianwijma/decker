@@ -76,6 +76,7 @@ function keyAccessibility(
     "aria-label",
     `${key?.label || `${key?.toggle ? "Key" : "Empty key"} ${index + 1}`}${key?.toggle ? ` · ${key.toggle.summary}` : ""}`,
   );
+  button.setAttribute("aria-description", key?.refreshStatus ?? "");
   button.setAttribute("aria-busy", String(Boolean(key?.toggle?.busy)));
   if (key?.toggle)
     button.setAttribute(
@@ -115,6 +116,8 @@ function renderKey(
   button.append(element("span", key?.label ?? "", "label"));
   if (key?.stateLabel)
     button.append(element("small", key.stateLabel, "toggle-state"));
+  if (key?.refreshStatus)
+    button.append(element("small", key.refreshStatus, "refresh-status"));
   if (key?.imageStatus === "stale")
     button.append(element("small", "Image stale", "image-status"));
 }
@@ -235,8 +238,11 @@ function connect() {
   socket.addEventListener("message", (event) => {
     try {
       const message = JSON.parse(event.data);
-      if (message.type === "view") render(message.view);
-      else if (message.type === "error") status.textContent = message.error;
+      if (message.type === "view") {
+        render(message.view);
+        if (!document.hidden)
+          send({ type: "view", version: message.view.version, visible: true });
+      } else if (message.type === "error") status.textContent = message.error;
     } catch {
       offline("Invalid deck state");
     }
@@ -254,7 +260,11 @@ function connect() {
       reconnect = setTimeout(() => void resume(), 2000);
   });
   socket.addEventListener("error", () => offline());
-  heartbeat = setInterval(() => send({ type: "heartbeat" }), 4000);
+  heartbeat = setInterval(() => {
+    send({ type: "heartbeat" });
+    if (view && !document.hidden)
+      send({ type: "view", version: view.version, visible: true });
+  }, 4000);
 }
 async function resume() {
   if (ended || document.hidden) return;

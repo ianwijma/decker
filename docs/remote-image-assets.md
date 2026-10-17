@@ -1,5 +1,9 @@
 # Bounded remote image assets (PR22)
 
+Current workspace schema is **v7**. [Visible button refresh](visible-button-refresh.md)
+documents the implemented PR23 visibility, activation and lifecycle extension.
+The original feature-specific schema/version notes below describe its baseline.
+
 The workflow palette's **Fetch image** action is `image.fetch` version 1. Its
 literal or bound HTTP(S) `url` resolves and validates before effects. The result
 contains `asset` (a lowercase local SHA-256 hash), `width:256`, `height:256`,

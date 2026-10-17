@@ -555,3 +555,41 @@ describe("truthful hardware sessions", () => {
     await h.sessions.stop();
   });
 });
+
+it("reports the applied view only after current frame writes; display updates preserve the epoch and deduplicate native writes", async () => {
+  const f = setup(),
+    first = { ...frame(), viewVersion: "page-one" };
+  f.sessions.configure([first], "assets");
+  await settle();
+  expect(f.status()).toMatchObject({ state: "ready", appliedView: "page-one" });
+  const writes = f.decks[0].fillKeyBuffer.mock.calls.length;
+  f.sessions.configure([{ ...first }], "assets");
+  await settle();
+  expect(f.decks[0].fillKeyBuffer).toHaveBeenCalledTimes(writes);
+  const rendering = deferred<Buffer<ArrayBuffer>>();
+  f.render.mockImplementationOnce(() => rendering.promise);
+  const next = {
+    ...frame("TEST-SERIAL", "Next page"),
+    viewVersion: "page-two",
+  };
+  f.sessions.configure([next], "assets");
+  await settle();
+  expect(f.status().appliedView).toBe("page-one");
+  const newest = {
+    ...frame("TEST-SERIAL", "Newest page"),
+    viewVersion: "page-three",
+  };
+  f.sessions.configure([newest], "assets");
+  rendering.resolve(Buffer.from("Obsolete"));
+  await settle();
+  expect(f.status()).toMatchObject({
+    state: "ready",
+    appliedView: "page-three",
+  });
+  f.decks[0].emit(
+    "error",
+    Object.assign(new Error("Permission denied"), { code: "EACCES" }),
+  );
+  expect(f.status().appliedView).toBeUndefined();
+  expect(f.status().state).toBe("permission-denied");
+});

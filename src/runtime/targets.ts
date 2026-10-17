@@ -59,7 +59,8 @@ export function toggleDefinitionStamp(
       n.branches?.forEach(graph);
     }
   };
-  for (const { target } of bindingTargets(binding)) {
+  for (const { phase, target } of bindingTargets(binding)) {
+    if (phase === "refresh") continue;
     if (target.kind === "workflow") reference(target.workflowId);
     else
       (target.kind === "action" ? [target.action] : target.actions).forEach(

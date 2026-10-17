@@ -6,7 +6,8 @@ export function executableToggle(binding: KeyBinding) {
   return t ? { on: t.on, off: t.off, source: t.source } : undefined;
 }
 export function bindingExecutionIdentity(binding: KeyBinding) {
-  if (!binding.toggle) return { ...binding, generation: 0 };
-  const { appearance: _, ...rest } = binding;
+  const { refresh: _refresh, ...ordinary } = binding;
+  if (!binding.toggle) return { ...ordinary, generation: 0 };
+  const { appearance: _, ...rest } = ordinary;
   return { ...rest, generation: 0, toggle: executableToggle(binding) };
 }

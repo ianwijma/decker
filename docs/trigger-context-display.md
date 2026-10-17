@@ -1,5 +1,9 @@
 # Trigger context and dynamic display (PR21)
 
+Current workspace schema is **v7**. [Visible button refresh](visible-button-refresh.md)
+documents the implemented PR23 visibility, activation and lifecycle extension.
+The original feature-specific schema/version notes below describe its baseline.
+
 PR21 introduced this contract on schema **v5**. [Workflow schedules](workflow-schedules.md)
 advance the workspace to v6 while retaining these display/authority contracts.
 Runtime context, display authority and last-good
@@ -96,8 +100,7 @@ For **PR23 visibility refresh**, main may validate/capture a saved origin, call
 `accept("refresh", origin)` and retain its private authority token as the lease
 handle. `displayState.end(token)` invalidates that invocation when the lease
 ends; cancel its Engine handle too. Never reuse an ended token or supply only
-public origin IDs. A new refresh accepts a new invocation. No visibility watcher,
-periodic timer or automatic refresh is implemented here.
+public origin IDs. A new refresh accepts a new invocation. The main-owned visibility/refresh service now uses this interface; see the PR23 document.
 
 Engine lifecycle begin/end messages are sent synchronously before effects and
 on abort/settlement, separately from batched history. Each main RPC additionally

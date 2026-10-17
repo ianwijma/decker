@@ -220,3 +220,12 @@ footer {
   color: #fff;
   font-size: clamp(8px, 1.6vw, 12px);
 }
+.refresh-status {
+  position: absolute;
+  top: 28%;
+  left: 0;
+  width: 100%;
+  background: #000b;
+  color: white;
+  font-size: 10px;
+}
