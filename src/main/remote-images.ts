@@ -66,8 +66,8 @@ export async function normalizeImage(
   )
     failure("Animated or multipage images are unsupported");
   // Full pixel decode, EXIF orientation, cover crop, deliberate alpha preservation.
-  // timeout is supported by installed sharp 0.34.5. A cancelled native operation
-  // retains its queue slot until it settles; its result can never be published.
+  // A cancelled native operation retains its queue slot until it settles;
+  // its result can never be published.
   const normalized = await sharp(bytes, options)
     .timeout({ seconds })
     .rotate()
