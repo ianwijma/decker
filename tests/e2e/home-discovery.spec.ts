@@ -68,7 +68,10 @@ type FixtureContext = {
 };
 // Stub requests and session evidence together. All synthetic hardware remains
 // at the IPC boundary; none is passed to a physical driver.
-async function installFixture(snapshot: Snapshot) {
+async function installFixture(
+  snapshot: Snapshot,
+  { reload = true }: { reload?: boolean } = {},
+) {
   await app.evaluate(({ BrowserWindow, ipcMain }, json) => {
     const context = globalThis as unknown as FixtureContext;
     const contents = BrowserWindow.getAllWindows()[0].webContents;
@@ -144,6 +147,11 @@ async function installFixture(snapshot: Snapshot) {
       return snapshot;
     });
   }, JSON.stringify(snapshot));
+  // Start the renderer with fixture-owned reads and publications. The one-shot
+  // event above is not a readiness barrier and cannot cancel in-flight real IPC.
+  // Reloading disposes that renderer's pending replies and obtains the fixture
+  // through the normal subscribe/initial-snapshot path, even if the event was missed.
+  if (reload) await page.reload({ waitUntil: "domcontentloaded" });
 }
 async function emit(snapshot: Snapshot) {
   await app.evaluate(
@@ -159,6 +167,44 @@ async function requests() {
 }
 const homeButton = () =>
   page.getByRole("button", { name: "Decker home", exact: true });
+
+test("fixture startup reads recover a missed installation publication and retain live discovery", async () => {
+  const fixture = await baseFixture();
+  fixture.devices = [device("xl:FIXTURE")];
+  await app.evaluate(({ BrowserWindow }) => {
+    const context = globalThis as unknown as FixtureContext & {
+      missedInstallation: boolean;
+    };
+    const contents = BrowserWindow.getAllWindows()[0].webContents;
+    const send = contents.send.bind(contents);
+    context.missedInstallation = false;
+    // Model installation before a listener can consume the one-shot event.
+    // Later live events must still use the real IPC boundary.
+    context.homeSend = (channel, ...args) => {
+      if (channel === "decker:snapshot" && !context.missedInstallation) {
+        context.missedInstallation = true;
+        return;
+      }
+      send(channel, ...args);
+    };
+  });
+  await installFixture(fixture);
+  expect(
+    await app.evaluate(
+      () =>
+        (globalThis as unknown as { missedInstallation: boolean })
+          .missedInstallation,
+    ),
+  ).toBe(true);
+  const prompts = page.locator(".discovery-prompt");
+  await expect(prompts).toHaveCount(1);
+  fixture.devices = [];
+  await emit(fixture);
+  await expect(prompts).toHaveCount(0);
+  fixture.devices = [device("xl:FIXTURE", { updatedAt: 2 })];
+  await emit(fixture);
+  await expect(prompts).toHaveCount(1);
+});
 
 test("a delayed startup snapshot cannot overwrite a newer live overview", async () => {
   const stale = await baseFixture();
@@ -195,7 +241,9 @@ test("a delayed startup snapshot cannot overwrite a newer live overview", async 
     .toBeGreaterThan(0);
   const latest = structuredClone(stale);
   latest.document.decks[0].name = "Latest workspace";
-  await installFixture(latest);
+  // Keep this renderer and its pending stale reply: this tests production
+  // ordering, rather than the fixture's normal fresh-renderer setup.
+  await installFixture(latest, { reload: false });
   const deck = page.getByRole("article", {
     name: "Deck overview: Latest workspace",
   });
