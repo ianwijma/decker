@@ -1,6 +1,9 @@
 import { z } from "zod";
 import type { AppDocument, KeyBinding } from "./schema";
 
+export const scheduleMetadataSchema = z
+  .object({ id: z.uuid(), name: z.string().min(1).max(80) })
+  .strict();
 const id = z.string().min(1).max(160);
 export const buttonOriginSchema = z
   .object({
@@ -17,6 +20,7 @@ export const launchSourceSchema = z
     kind: z.enum(["button", "test", "manual", "scheduled", "refresh", "probe"]),
     invocationId: id,
     origin: buttonOriginSchema.optional(),
+    schedule: scheduleMetadataSchema.optional(),
   })
   .strict();
 /** Trusted main/runtime API. Never decode this from renderer requests or action config. */
@@ -24,7 +28,12 @@ export type LaunchSource = z.infer<typeof launchSourceSchema>;
 export type TrustedLaunch = { source: LaunchSource; authority?: string };
 export const executionContextSchema = z
   .object({
-    source: z.object({ kind: launchSourceSchema.shape.kind }).strict(),
+    source: z
+      .object({
+        kind: launchSourceSchema.shape.kind,
+        schedule: scheduleMetadataSchema.optional(),
+      })
+      .strict(),
     origin: buttonOriginSchema.nullable(),
     rootRunId: id,
     invocationId: id,

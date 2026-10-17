@@ -1,3 +1,4 @@
+import { WorkflowSchedules } from "./WorkflowSchedules";
 import {
   bindingChoices,
   actionOutputDescription,
@@ -922,6 +923,7 @@ export const Flows = memo(function Flows() {
                 <p className="muted small">
                   Running workflows keep their current revision when you edit.
                 </p>
+                <WorkflowSchedules key={workflow.id} workflowId={workflow.id} />
                 <button
                   className="wide"
                   onClick={() => {
@@ -931,6 +933,15 @@ export const Flows = memo(function Flows() {
                     copy.revision = 1;
                     edit((d) => {
                       d.workflows.push(copy);
+                      for (const schedule of d.schedules.filter(
+                        (s) => s.workflowId === workflow.id,
+                      ))
+                        d.schedules.push({
+                          ...structuredClone(schedule),
+                          id: uid(),
+                          workflowId: copy.id,
+                          enabled: false,
+                        });
                     });
                     setFlowId(copy.id);
                     setPath([]);
@@ -942,6 +953,9 @@ export const Flows = memo(function Flows() {
                   className="danger wide"
                   onClick={() => {
                     edit((d) => {
+                      d.schedules = d.schedules.filter(
+                        (s) => s.workflowId !== workflow.id,
+                      );
                       d.workflows = d.workflows.filter(
                         (f) => f.id !== workflow.id,
                       );

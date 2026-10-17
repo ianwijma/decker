@@ -24,9 +24,11 @@
   "dependencies": {
     "@elgato-stream-deck/node": "^7.8.0",
     "@xyflow/react": "^12.10.0",
+    "cron-parser": "5.10.2",
     "dbus-next": "^0.10.2",
     "execa": "^9.6.1",
     "lucide-react": "^0.468.0",
+    "luxon": "3.7.2",
     "obs-websocket-js": "^5.0.6",
     "qrcode": "^1.5.4",
     "react": "^19.2.0",
@@ -40,6 +42,7 @@
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.2.0",
+    "@types/luxon": "3.7.1",
     "@types/node": "^24.10.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.0",

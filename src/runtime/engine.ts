@@ -159,7 +159,10 @@ export class Engine {
       ? undefined
       : binding?.launch?.authority;
     const rootContext: ExecutionContext = {
-      source: { kind: source.kind },
+      source: {
+        kind: source.kind,
+        ...(source.schedule ? { schedule: source.schedule } : {}),
+      },
       origin: source.origin ?? null,
       rootRunId: record.id,
       invocationId: source.invocationId,
@@ -191,6 +194,8 @@ export class Engine {
       path: string,
     ): Promise<Json> => {
       if (scope.context) {
+        if (scope.context.source.schedule)
+          Object.freeze(scope.context.source.schedule);
         Object.freeze(scope.context.source);
         if (scope.context.origin) Object.freeze(scope.context.origin);
         Object.freeze(scope.context);

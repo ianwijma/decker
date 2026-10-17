@@ -1,6 +1,8 @@
 # Trigger context and dynamic display (PR21)
 
-Workspace schema remains **v5**. Runtime context, display authority and last-good
+PR21 introduced this contract on schema **v5**. [Workflow schedules](workflow-schedules.md)
+advance the workspace to v6 while retaining these display/authority contracts.
+Runtime context, display authority and last-good
 appearance are separate from authored configuration. Existing `deck.appearance`
 actions remain version 1, with their label/background configuration unchanged.
 Exact legacy label/background objects retain their previous 80-character label

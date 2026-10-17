@@ -92,7 +92,8 @@ function state(
 it("migrates actual v4 toggle documents and retains the durable v4 state through appearance edits", async () => {
   const { doc, b, deckId } = fixture();
   delete b.toggle!.appearance;
-  const old = { ...doc, schemaVersion: 4 };
+  const { schedules: _schedules, ...historical } = doc;
+  const old = { ...historical, schemaVersion: 4 };
   expect(v4DocumentSchema.parse(old)).toEqual(old);
   const stamp = createHash("sha256")
     .update(JSON.stringify(b.toggle))
@@ -108,7 +109,7 @@ it("migrates actual v4 toggle documents and retains the durable v4 state through
   );
   const migrated = (await new Persistence(dir).load()).document,
     saved = migrated.profiles[0].pages[0].keys[0];
-  expect(migrated.schemaVersion).toBe(5);
+  expect(migrated.schemaVersion).toBe(defaults().schemaVersion);
   expect(toggleStamp(saved)).toBe(stamp);
   saved.appearance.label = "Cosmetic";
   saved.toggle!.appearance = { on: { label: "Styled", asset: null } };

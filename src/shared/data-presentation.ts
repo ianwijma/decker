@@ -244,6 +244,8 @@ export function bindingChoices(
   }));
   for (const [key, type] of Object.entries({
     "source.kind": "text",
+    "source.schedule.id": "text",
+    "source.schedule.name": "text",
     origin: "JSON",
     "origin.deckId": "text",
     "origin.profileId": "text",
@@ -261,10 +263,13 @@ export function bindingChoices(
       name: key,
       group: "Trigger context",
       type,
-      conditional: key.startsWith("origin."),
-      hint: key.startsWith("origin")
-        ? "Read-only saved origin; unavailable for manual, detached test, scheduled or private probe runs."
-        : "Immutable runtime metadata, independent of caller inputs and variables.",
+      conditional:
+        key.startsWith("origin.") || key.startsWith("source.schedule."),
+      hint: key.startsWith("source.schedule.")
+        ? "Available only for scheduled runs; add a fallback for other launch sources."
+        : key.startsWith("origin")
+          ? "Read-only saved origin; unavailable for manual, detached test, scheduled or private probe runs."
+          : "Immutable runtime metadata, independent of caller inputs and variables.",
     });
   for (const p of producers) {
     const { type, fields } = nodeOutput(p.node, workflow, all, aliases);

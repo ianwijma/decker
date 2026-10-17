@@ -558,7 +558,7 @@ describe("HTTP data pipeline", () => {
       document.workflows = [f];
       await store.save(document, []);
       const loaded = (await new Persistence(dir).load()).document;
-      expect(loaded.schemaVersion).toBe(5);
+      expect(loaded.schemaVersion).toBe(defaults().schemaVersion);
       const result = await new Engine(handler(notified), () => {}).start(
         loaded.workflows[0],
         loaded.workflows,

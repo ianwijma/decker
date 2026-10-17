@@ -1,3 +1,4 @@
+import { CURRENT_SCHEMA_VERSION } from "../../src/shared/schedules";
 import { test, expect, _electron as electron } from "@playwright/test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -128,7 +129,7 @@ test("captured permission failure has truthful badges, device details and workin
       connected: false,
       configured: true,
     });
-    expect(result.document.schemaVersion).toBe(5);
+    expect(result.document.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
   } finally {
     await app.close();
     await rm(directory, { recursive: true, force: true });
