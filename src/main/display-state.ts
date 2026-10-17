@@ -114,7 +114,16 @@ export class DisplayState {
     const key = originKey(a.source.origin);
     this.owners.set(key, Math.max(this.owners.get(key) ?? 0, a.order));
   }
+  live(token: string, runId: string) {
+    const a = this.authorities.get(token);
+    return Boolean(
+      a?.runId === runId &&
+      a.source.origin &&
+      this.stamp(a.source.origin) === a.stamp,
+    );
+  }
   end(token: string) {
+    const runId = this.authorities.get(token)?.runId;
     const origin = this.authorities.get(token)?.source.origin;
     this.authorities.delete(token);
     if (
@@ -125,6 +134,7 @@ export class DisplayState {
       )
     )
       this.owners.delete(originKey(origin));
+    return runId;
   }
   cancelRun(runId: string) {
     for (const [token, a] of this.authorities)

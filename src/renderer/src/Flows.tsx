@@ -953,6 +953,11 @@ export const Flows = memo(function Flows() {
                   className="danger wide"
                   onClick={() => {
                     edit((d) => {
+                      for (const p of d.profiles)
+                        for (const page of p.pages)
+                          for (const b of Object.values(page.keys))
+                            if (b.refresh?.workflowId === workflow.id)
+                              b.refresh.enabled = false;
                       d.schedules = d.schedules.filter(
                         (s) => s.workflowId !== workflow.id,
                       );

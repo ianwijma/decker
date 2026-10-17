@@ -1,3 +1,5 @@
+import { RefreshRuns } from "./refresh-runs";
+import { buttonOriginSchema } from "../shared/trigger-context";
 import { ScheduledRuns } from "./scheduled-runs";
 import { launchSourceSchema, originBinding } from "../shared/trigger-context";
 import { toggleBindings } from "../shared/toggle-contract";
@@ -135,6 +137,7 @@ const engine = new Engine(
 );
 const coordinator = new Coordinator(engine);
 const scheduled = new ScheduledRuns(engine, send);
+const refreshed = new RefreshRuns(engine, send);
 let scheduleConfiguration = "";
 const storageReplies = new Map<
   string,
@@ -259,6 +262,15 @@ const toggles = new Toggles(
 );
 const schema = z.discriminatedUnion("type", [
   z.object({
+    type: z.literal("refreshRun"),
+    token: z.uuid(),
+    origin: buttonOriginSchema,
+    stamp: z.string().length(64),
+    configuration: z.string(),
+    launch: z.object({ source: launchSourceSchema, authority: z.string() }),
+  }),
+  z.object({ type: z.literal("refreshCancel"), token: z.uuid() }),
+  z.object({
     type: z.literal("scheduleRun"),
     token: z.uuid(),
     configuration: z.string(),
@@ -351,6 +363,19 @@ port.on("message", async (event) => {
   try {
     const message = schema.parse(event.data);
     switch (message.type) {
+      case "refreshRun":
+        refreshed.start(
+          document,
+          message.origin,
+          message.stamp,
+          message.token,
+          message.launch,
+          message.configuration === scheduleConfiguration,
+        );
+        break;
+      case "refreshCancel":
+        refreshed.cancel(message.token);
+        break;
       case "scheduleRun":
         scheduled.start(
           document,
@@ -370,6 +395,7 @@ port.on("message", async (event) => {
             JSON.stringify(message.document.connections) ||
           JSON.stringify(credentials) !== JSON.stringify(message.credentials);
         document = message.document;
+        refreshed.configure(document);
         scheduleConfiguration = message.scheduleConfiguration ?? "";
         send({
           type: "scheduleConfigured",
@@ -471,6 +497,7 @@ port.on("message", async (event) => {
         void diagnose();
         break;
       case "stop":
+        refreshed.stop();
         scheduled.stop();
         toggles.stop();
         for (const pending of storageReplies.values()) {

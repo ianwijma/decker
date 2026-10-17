@@ -55,6 +55,7 @@ const sessions = new DeviceSessions(
 );
 const frameSchema = z.object({
   deckId: z.string(),
+  viewVersion: z.string().max(200).optional(),
   hardwareId: z.string(),
   name: z.string().optional(),
   rows: z.number().int().positive().optional(),
@@ -65,6 +66,7 @@ const frameSchema = z.object({
     appearanceSchema.extend({
       stateLabel: z.string().max(40).optional(),
       imageStatus: z.literal("stale").optional(),
+      refreshStatus: z.string().max(40).optional(),
     }),
   ),
 });

@@ -31,6 +31,14 @@ export const isLocalAddress = (address: string) => {
   );
 };
 const inputSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("view"),
+      version: z.string().max(200),
+      visible: z.boolean(),
+      sequence: z.number().int().positive(),
+    })
+    .strict(),
   z.object({
     type: z.literal("down"),
     key: z.number().int().min(0).max(255),
@@ -53,6 +61,8 @@ export class WebDeckServer {
   private sockets = new Map<
     WebSocket,
     {
+      version?: string;
+      viewAt?: number;
       clientId: string;
       source: string;
       alive: boolean;
@@ -94,6 +104,13 @@ export class WebDeckServer {
         down: boolean;
       }) => void;
       disconnect: (source: string) => void;
+      visibilityLost?: (source: string) => void;
+      visibility?: (event: {
+        source: string;
+        deckId: string;
+        version: string;
+      }) => void;
+      now?: () => number;
       status: (status: WebStatus) => void;
       error?: (error: unknown) => void;
     },
@@ -182,8 +199,14 @@ export class WebDeckServer {
       );
     }
     this.interval = setInterval(() => {
-      const now = Date.now();
+      const now = this.options.now?.() ?? Date.now();
       for (const [ws, s] of this.sockets) {
+        if (s.viewAt !== undefined && now - s.viewAt >= 12000) {
+          s.version = undefined;
+          s.viewAt = undefined;
+          s.held.clear();
+          this.options.disconnect(s.source);
+        }
         if (!s.alive) {
           this.drop(ws);
           ws.terminate();
@@ -210,8 +233,15 @@ export class WebDeckServer {
     for (const [ws, s] of this.sockets) {
       const client = this.clients.get(s.clientId),
         view = client && this.views.get(client.deckId);
-      if (view) this.send(ws, { type: "view", view });
-      else {
+      if (view) {
+        if (s.version && s.version !== view.version) {
+          s.version = undefined;
+          s.viewAt = undefined;
+          // A held press still owns its captured release/hold binding across navigation.
+          this.options.visibilityLost?.(s.source);
+        }
+        this.send(ws, { type: "view", view });
+      } else {
         this.drop(ws);
         ws.close(1008, "Deck removed");
       }
@@ -515,7 +545,7 @@ export class WebDeckServer {
       try {
         const s = this.sockets.get(ws);
         if (!s) return;
-        const now = Date.now();
+        const now = this.options.now?.() ?? Date.now();
         if (now - s.rateAt > 1000) {
           s.rateAt = now;
           s.rate = 0;
@@ -528,6 +558,25 @@ export class WebDeckServer {
         const view = this.views.get(client.deckId);
         if (!view || !this.clients.has(client.id))
           throw new Error("Deck unavailable");
+        if (input.type === "view") {
+          if (!input.visible || input.version !== view.version) {
+            s.version = undefined;
+            s.viewAt = undefined;
+            if (!input.visible) {
+              s.held.clear();
+              this.options.disconnect(s.source);
+            } else this.options.visibilityLost?.(s.source);
+            return;
+          }
+          s.version = view.version;
+          s.viewAt = now;
+          this.options.visibility?.({
+            source: s.source,
+            deckId: client.deckId,
+            version: view.version,
+          });
+          return;
+        }
         if (input.type === "heartbeat") return;
         if (input.type === "reset") {
           s.held.clear();

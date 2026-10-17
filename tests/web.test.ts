@@ -54,7 +54,10 @@ async function fixture() {
   );
   await writeFile(join(directory, "a".repeat(64)), "image");
   const input = vi.fn(),
-    disconnect = vi.fn();
+    disconnect = vi.fn(),
+    visibility = vi.fn(),
+    visibilityLost = vi.fn();
+  let clock = Date.now();
   let status: WebStatus = {
       running: false,
       port: 0,
@@ -72,6 +75,9 @@ async function fixture() {
     },
     input,
     disconnect,
+    visibility,
+    visibilityLost,
+    now: () => clock,
     status: (s) => {
       status = s;
     },
@@ -122,6 +128,11 @@ async function fixture() {
     disconnect,
     post,
     pair,
+    visibility,
+    visibilityLost,
+    advanceClock: (ms: number) => {
+      clock += ms;
+    },
     status: () => status,
     stored: () => stored,
   };
@@ -499,4 +510,132 @@ it("authorizes resolved dynamic assets per deck and preserves desktop/web/frame 
     ),
   ).toEqual(await images.render(desktop, 72, bytes));
   connection.ws.close();
+});
+
+it("owns foreground current-view acknowledgements per socket; pairing/pong/online alone never leases", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  try {
+    const f = await fixture(),
+      paired = await f.pair(),
+      other = await f.pair("other");
+    const a = await connect(f.base, paired.cookie),
+      b = await connect(f.base, paired.cookie),
+      c = await connect(f.base, other.cookie);
+    expect(f.visibility).not.toHaveBeenCalled();
+    a.ws.send(JSON.stringify({ type: "heartbeat", sequence: 1 }));
+    a.ws.send(
+      JSON.stringify({
+        type: "view",
+        version: "old",
+        visible: true,
+        sequence: 2,
+      }),
+    );
+    await sleep(20);
+    expect(f.visibility).not.toHaveBeenCalled();
+    a.ws.send(
+      JSON.stringify({
+        type: "view",
+        version: "page-1",
+        visible: true,
+        sequence: 3,
+      }),
+    );
+    b.ws.send(
+      JSON.stringify({
+        type: "view",
+        version: "page-1",
+        visible: true,
+        sequence: 1,
+      }),
+    );
+    c.ws.send(
+      JSON.stringify({
+        type: "view",
+        version: "page-1",
+        visible: true,
+        sequence: 1,
+        deckId: "tablet",
+      }),
+    );
+    await sleep(20);
+    expect(f.visibility).toHaveBeenCalledTimes(2);
+    expect(f.visibility.mock.calls.map(([event]) => event.deckId)).toEqual([
+      "tablet",
+      "tablet",
+    ]);
+    const sourceA = f.visibility.mock.calls[0][0].source,
+      sourceB = f.visibility.mock.calls[1][0].source;
+    expect(sourceA).not.toBe(sourceB);
+    a.ws.send(
+      JSON.stringify({
+        type: "view",
+        version: "page-1",
+        visible: false,
+        sequence: 4,
+      }),
+    );
+    await sleep(20);
+    expect(f.disconnect).toHaveBeenCalledWith(sourceA);
+    const count = f.visibility.mock.calls.length;
+    b.ws.send(
+      JSON.stringify({
+        type: "view",
+        version: "page-1",
+        visible: true,
+        sequence: 1,
+      }),
+    );
+    await sleep(20);
+    expect(f.visibility).toHaveBeenCalledTimes(count);
+    f.server.configure([
+      {
+        ...view(),
+        keys: {
+          ...view().keys,
+          0: { ...view().keys[0], label: "Display only" },
+        },
+      },
+      view("other"),
+    ]);
+    await sleep(20);
+    expect(f.disconnect.mock.calls.some(([source]) => source === sourceB)).toBe(
+      false,
+    );
+    f.server.configure([{ ...view(), version: "page-2" }, view("other")]);
+    expect(f.visibilityLost).toHaveBeenCalledWith(sourceB);
+    b.ws.send(
+      JSON.stringify({
+        type: "view",
+        version: "page-2",
+        visible: true,
+        sequence: 2,
+      }),
+    );
+    await sleep(20);
+    expect(f.visibility).toHaveBeenLastCalledWith({
+      source: sourceB,
+      deckId: "tablet",
+      version: "page-2",
+    });
+    f.advanceClock(15001);
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(f.disconnect).toHaveBeenCalledWith(sourceB);
+    b.ws.send(
+      JSON.stringify({
+        type: "view",
+        version: "page-2",
+        visible: true,
+        sequence: 3,
+      }),
+    );
+    await sleep(20);
+    f.server.revoke(paired.clientId);
+    expect(f.disconnect).toHaveBeenCalledWith(sourceB);
+    a.ws.terminate();
+    b.ws.terminate();
+    c.ws.terminate();
+  } finally {
+    vi.useRealTimers();
+  }
 });

@@ -18,6 +18,7 @@ const view = z.object({
     z.object({
       stateLabel: z.string().max(40).optional(),
       imageStatus: z.literal("stale").optional(),
+      refreshStatus: z.string().max(40).optional(),
       toggle: z
         .object({
           confirmed: z.enum(["on", "off", "unknown"]),
@@ -111,6 +112,9 @@ port.on("message", (event) => {
                 return pendingSave;
               },
               input: (event) => send({ type: "input", ...event }),
+              visibilityLost: (source) =>
+                send({ type: "visibilityLost", source }),
+              visibility: (event) => send({ type: "visibility", ...event }),
               disconnect: (source) => send({ type: "disconnect", source }),
               status: (status) => send({ type: "status", status }),
               error: (error) => send({ type: "error", error: String(error) }),

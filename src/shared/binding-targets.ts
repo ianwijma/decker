@@ -16,5 +16,10 @@ export function bindingTargets(binding: KeyBinding) {
         target: binding.toggle.source.probe,
       });
   }
+  if (binding.refresh)
+    entries.push({
+      phase: "refresh",
+      target: { kind: "workflow", workflowId: binding.refresh.workflowId },
+    });
   return entries;
 }

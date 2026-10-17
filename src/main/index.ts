@@ -1,3 +1,7 @@
+import { RefreshService } from "./refresh-service";
+import { RefreshRunner } from "./refresh-runner";
+import { viewVersion } from "../runtime/refresh-definition";
+import { preserveRefreshActivation, refreshError } from "../shared/refresh";
 import { Scheduler } from "./scheduler";
 import { ScheduledRunner } from "./scheduled-runner";
 import { ScheduleWatermarks } from "./schedule-watermarks";
@@ -77,7 +81,11 @@ import {
 import { Triggers } from "../device/triggers";
 import { bindingExecutionIdentity } from "../shared/toggle-identity";
 import { selectToggle, toggleDisplay } from "../shared/toggle-presentation";
-import { buttonAppearance, legacyDisplayFeedback } from "../shared/feedback";
+import {
+  activityKey,
+  buttonAppearance,
+  legacyDisplayFeedback,
+} from "../shared/feedback";
 import { ButtonActivity } from "../runtime/activity";
 import { redact } from "../runtime/data";
 import {
@@ -123,10 +131,25 @@ let window: BrowserWindow | undefined,
   toggleStorage: ToggleStorage,
   displayState: DisplayState;
 let toggleStates: ToggleState[] = [];
+let refresh: RefreshService | undefined;
+const refreshRunner = new RefreshRunner(
+  (message) => post("runner", message),
+  (origin) => displayState.accept("refresh", origin),
+  (launch, acceptedRunId) => {
+    if (!launch.authority) return;
+    const runId = displayState.end(launch.authority) ?? acceptedRunId;
+    if (runId) {
+      mainRpc.invalidate(undefined, runId);
+      generatedAssets?.release(runId);
+      collectAssets();
+    }
+  },
+);
 let scheduler: Scheduler | undefined;
 let scheduleWatermarks: ScheduleWatermarks;
 let scheduleConfiguration = "";
 let suspended = false;
+let simulatorRendererReady = false;
 const scheduledRunner = new ScheduledRunner(
   (message) => post("runner", message),
   (schedule) => {
@@ -140,6 +163,16 @@ let document: AppDocument = defaults(),
   devices: Snapshot["devices"] = [],
   capabilities: Snapshot["capabilities"] = [],
   observed: Snapshot["observed"] = {};
+// A desired-page epoch must change even on A -> B -> A; art/status saves keep it.
+const surfaceViews = new Map<string, { identity: string; version: string }>();
+function surfaceVersion(deckId: string) {
+  const identity = viewVersion(document, deckId),
+    old = surfaceViews.get(deckId);
+  if (old?.identity === identity) return old.version;
+  const version = uid();
+  surfaceViews.set(deckId, { identity, version });
+  return version;
+}
 let webStatus: WebStatus = {
   running: false,
   port: 0,
@@ -166,12 +199,22 @@ let credentialEpoch = uid();
 const snapshot = (): Snapshot => {
   const secrets = Object.values(credentials?.all() ?? {}),
     display = displayState?.snapshot() ?? {};
+  const refreshDisplay = Object.fromEntries(
+    (refresh?.snapshot() ?? []).map((s) => [
+      activityKey(s.origin.deckId, {
+        id: s.origin.bindingId,
+        generation: s.origin.generation,
+      }),
+      s.status,
+    ]),
+  );
   const safeObserved = displayObserved(
     { ...observed, diagnostics: diagnosticFaults.snapshot() },
     feedback.snapshot(),
     display,
     secrets,
   );
+  safeObserved.buttonRefresh = refreshDisplay;
   const safeDevices = devices.map(
     (device) => redactDiagnostics(device, secrets) as typeof device,
   );
@@ -194,6 +237,10 @@ const snapshot = (): Snapshot => {
   return {
     document,
     schedules: scheduler?.snapshot() ?? [],
+    refresh: refresh?.snapshot() ?? [],
+    viewVersions: Object.fromEntries(
+      document.decks.map((d) => [d.id, surfaceVersion(d.id)]),
+    ),
     toggles: toggleStates.filter((state) =>
       liveToggles.has(
         toggleKey(state.deckId, {
@@ -298,6 +345,15 @@ function deckAppearance(deckId: string) {
         ...observed,
         buttonFeedback: activity,
         buttonDisplay: display,
+        buttonRefresh: Object.fromEntries(
+          (refresh?.snapshot() ?? []).map((s) => [
+            activityKey(s.origin.deckId, {
+              id: s.origin.bindingId,
+              generation: s.origin.generation,
+            }),
+            s.status,
+          ]),
+        ),
       },
       document.settings.accent,
       deckId,
@@ -310,6 +366,7 @@ function deckAppearance(deckId: string) {
       asset: appearance.asset,
       stateLabel: appearance.stateLabel,
       imageStatus: appearance.imageStatus,
+      refreshStatus: appearance.refreshStatus,
       toggle: toggleDisplay(
         binding,
         selectToggle(toggleStates, binding, deckId),
@@ -329,21 +386,7 @@ function configureWeb() {
       columns: deck.columns,
       pageName: page(deck.id).name,
       accent: document.settings.accent,
-      version: createHash("sha256")
-        .update(
-          JSON.stringify([
-            deck.activeProfileId,
-            deck.activePageId,
-            deck.rows,
-            deck.columns,
-            Object.entries(page(deck.id).keys).map(([slot, key]) => [
-              slot,
-              key.id,
-              key.generation,
-            ]),
-          ]),
-        )
-        .digest("hex"),
+      version: surfaceVersion(deck.id),
       keys: deckAppearance(deck.id),
     }));
   const message = {
@@ -391,6 +434,19 @@ function input(deckId: string, source: string, key: number, down: boolean) {
   else triggers.up(source, key);
 }
 const feedback = new ButtonActivity();
+function syncHardwareVisibility() {
+  for (const deck of document.decks.filter((d) => d.kind === "hardware")) {
+    const device = devices.find((d) => d.id === deck.hardwareId);
+    const source = `hardware:${deck.id}`;
+    if (
+      device?.state === "ready" &&
+      device.appliedView === surfaceVersion(deck.id) &&
+      !suspended
+    )
+      refresh?.lease(source, deck.id, device.appliedView);
+    else refresh?.drop(source);
+  }
+}
 function configureDevice() {
   post("device", {
     type: "configure",
@@ -399,6 +455,7 @@ function configureDevice() {
       .map((deck) => ({
         deckId: deck.id,
         hardwareId: deck.hardwareId,
+        viewVersion: surfaceVersion(deck.id),
         name: deck.name,
         rows: deck.rows,
         columns: deck.columns,
@@ -420,7 +477,15 @@ function configureDevice() {
   configureWeb();
 }
 function configure(activateToggles = false) {
+  for (const id of surfaceViews.keys())
+    if (!document.decks.some((d) => d.id === id)) surfaceViews.delete(id);
+  // Reconcile desired epochs before accepting any delayed surface reports.
+  for (const deck of document.decks) surfaceVersion(deck.id);
   scheduleConfiguration = uid();
+  if (!document.settings.webEnabled) refresh?.dropPrefix("web:");
+  refresh?.configure(document);
+  refresh?.ready(false);
+  syncHardwareVisibility();
   scheduler?.configure(document);
   scheduler?.ready(false);
   feedback.reconcile(document);
@@ -629,14 +694,33 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         return;
       }
       if (name === "web") {
+        if (message.type === "visibilityLost") {
+          refresh?.drop(message.source);
+          return;
+        }
+        if (message.type === "visibility") {
+          const deck = document.decks.find(
+            (d) => d.id === message.deckId && d.kind === "web",
+          );
+          if (
+            deck &&
+            document.settings.webEnabled &&
+            message.version === surfaceVersion(deck.id) &&
+            !suspended &&
+            !quitting
+          )
+            refresh?.lease(message.source, deck.id, message.version);
+          return;
+        }
         if (message.type === "status") {
           webStatus = message.status;
           publish();
         } else if (message.type === "input")
           input(message.deckId, message.source, message.key, message.down);
-        else if (message.type === "disconnect")
+        else if (message.type === "disconnect") {
           triggers.disconnect(message.source);
-        else if (message.type === "reply") {
+          refresh?.drop(message.source);
+        } else if (message.type === "reply") {
           const pending = webReplies.get(message.id);
           if (pending) {
             clearTimeout(pending.timer);
@@ -668,6 +752,7 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
           publish();
         } else if (message.type === "devices") {
           devices = message.devices;
+          syncHardwareVisibility();
           for (const deck of document.decks.filter(
             (d) => d.kind === "hardware",
           )) {
@@ -686,9 +771,13 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         } else if (message.type === "key") {
           const deck = document.decks.find((d) => d.hardwareId === message.id);
           if (deck) input(deck.id, message.id, message.key, message.down);
-        } else if (message.type === "disconnect")
+        } else if (message.type === "disconnect") {
           triggers.disconnect(message.id);
-        else if (message.type === "diagnostic")
+          for (const d of document.decks.filter(
+            (d) => d.hardwareId === message.id,
+          ))
+            refresh?.drop(`hardware:${d.id}`);
+        } else if (message.type === "diagnostic")
           diagnostic(message.error, `worker:${name}`, `${name} service`);
         return;
       }
@@ -697,8 +786,15 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
           message.configuration === scheduleConfiguration &&
           !suspended &&
           !quitting
-        )
+        ) {
           scheduler?.ready(true);
+          refresh?.ready(true);
+        }
+      } else if (
+        message.type === "refreshAccepted" ||
+        message.type === "refreshSettled"
+      ) {
+        refreshRunner.message(message);
       } else if (
         message.type === "scheduleAccepted" ||
         message.type === "scheduleSettled"
@@ -760,7 +856,8 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         runs = [...finished, ...active].sort(
           (a, b) => a.startedAt - b.startedAt,
         );
-        feedback.update(record, document);
+        if (record.context?.source.kind !== "refresh")
+          feedback.update(record, document);
         configureDevice();
         if (record.status === "success" || record.status === "failure")
           setTimeout(() => {
@@ -792,6 +889,11 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         diagnostic(message.error, `worker:${name}`, `${name} service`);
       else if (message.type === "mainAction") {
         try {
+          if (
+            message.context.authority &&
+            !displayState.live(message.context.authority, message.context.runId)
+          )
+            throw new Error("Invocation ended");
           const signal = mainRpc.begin(
             child,
             message.id,
@@ -836,6 +938,7 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
     workers.delete(name);
     if (quitting) return;
     if (name === "device") {
+      refresh?.dropPrefix("hardware:");
       for (const device of devices) triggers.disconnect(device.id);
       observed.hardwareNativeReady = false;
       devices = devices.map((device) => ({
@@ -847,6 +950,8 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
         errorDetails: undefined,
       }));
     } else if (name === "runner") {
+      refresh?.pause();
+      refreshRunner.stop();
       scheduler?.pause();
       scheduledRunner.stop();
       displayState.invalidate();
@@ -874,6 +979,7 @@ function startWorker(name: "runner" | "device" | "web", failures = 0) {
       persist();
     }
     if (name === "web") {
+      refresh?.dropPrefix("web:");
       triggers.disconnect("web");
       lastWebConfigure = "";
       webStatus = {
@@ -945,6 +1051,7 @@ function handle(raw: unknown) {
   return [
     "save",
     "scheduleEnable",
+    "refreshEnable",
     "credential",
     "obsSave",
     "import",
@@ -959,6 +1066,46 @@ function handle(raw: unknown) {
 }
 async function handleRequest(request: Request) {
   switch (request.type) {
+    case "simulatorVisible": {
+      const deck = document.decks.find((d) => d.id === request.deckId);
+      if (!request.visible) {
+        refresh?.drop("simulator", request.version);
+        return null;
+      }
+      if (
+        !suspended &&
+        !quitting &&
+        simulatorRendererReady &&
+        window?.isVisible() &&
+        !window.isMinimized() &&
+        deck?.kind === "simulator" &&
+        document.activeDeckId === deck.id &&
+        request.version === surfaceVersion(deck.id)
+      )
+        refresh?.lease("simulator", deck.id, request.version);
+      else refresh?.drop("simulator", request.version);
+      return null;
+    }
+    case "refreshEnable": {
+      const b = document.profiles
+        .flatMap((p) => p.pages.flatMap((page) => Object.values(page.keys)))
+        .find((b) => b.id === request.bindingId);
+      if (
+        !b?.refresh ||
+        JSON.stringify(b.refresh) !== JSON.stringify(request.expected)
+      )
+        throw new Error("Refresh changed; reopen the saved key and retry");
+      const error = refreshError(b.refresh, document);
+      if (request.enabled && error) throw new Error(error);
+      const next = structuredClone(document);
+      next.profiles
+        .flatMap((p) => p.pages.flatMap((page) => Object.values(page.keys)))
+        .find((k) => k.id === b.id)!.refresh!.enabled = request.enabled;
+      await store.save(next, runs);
+      document = next;
+      configure();
+      return snapshot();
+    }
     case "schedulePreview":
       return previewSchedule(request.schedule, Date.now(), request.count);
     case "scheduleEnable": {
@@ -978,6 +1125,7 @@ async function handleRequest(request: Request) {
     case "save": {
       const next = request.document;
       preserveScheduleActivation(document, next);
+      preserveRefreshActivation(document, next);
       preserveNavigation(document, next, request.navigationEdits);
       preserveBrightness(document, next, request.brightnessEdits);
       validateDocument(next);
@@ -1001,9 +1149,9 @@ async function handleRequest(request: Request) {
               .flatMap((p) => p.pages)
               .flatMap((p) => Object.values(p.keys))
               .find((k) => k.id === b.id);
-            if (!old && b.toggle) {
+            if (!old && (b.toggle || b.refresh)) {
               // New renderer-supplied bindings cannot resurrect a deleted
-              // binding's durable state by reusing its old id/generation.
+              // binding's durable or cached state by reusing its old id/generation.
               b.id = uid();
               b.generation = 0;
             }
@@ -1100,6 +1248,7 @@ async function handleRequest(request: Request) {
     case "selectDeck":
       if (!document.decks.some((d) => d.id === request.deckId))
         throw new Error("Deck not found");
+      refresh?.drop("simulator");
       document.activeDeckId = request.deckId;
       persist();
       publish();
@@ -1185,6 +1334,7 @@ async function handleRequest(request: Request) {
         approved: request.approved,
       });
     case "revokeClient":
+      refresh?.dropPrefix(`web:${request.clientId}:`);
       return webRequest("revoke", { clientId: request.clientId });
     case "copyWebLink":
     case "openWeb": {
@@ -1363,6 +1513,8 @@ async function handleRequest(request: Request) {
         post("runner", { type: "cancel", id: r.id });
 
       next.settings.launchAtLogin = document.settings.launchAtLogin;
+      refresh?.pause(true);
+      refreshRunner.stop();
       post("web", { type: "resetPairings" });
       lastWebConfigure = "";
       next.settings.webEnabled = false;
@@ -1376,6 +1528,7 @@ async function handleRequest(request: Request) {
   }
 }
 function createWindow() {
+  simulatorRendererReady = false;
   window = new BrowserWindow({
     width: 1480,
     height: 960,
@@ -1391,6 +1544,24 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+  window.on("hide", () => refresh?.drop("simulator"));
+  window.on("minimize", () => refresh?.drop("simulator"));
+  window.webContents.on("did-finish-load", () => {
+    simulatorRendererReady = true;
+  });
+  window.webContents.on("render-process-gone", () => {
+    simulatorRendererReady = false;
+    refresh?.drop("simulator");
+  });
+  window.webContents.on(
+    "did-start-navigation",
+    (_event, _url, _inPlace, mainFrame) => {
+      if (mainFrame) {
+        simulatorRendererReady = false;
+        refresh?.drop("simulator");
+      }
+    },
+  );
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler(
@@ -1404,6 +1575,7 @@ function createWindow() {
     },
   );
   window.on("close", (event) => {
+    refresh?.drop("simulator");
     obsTests.close();
     if (!quitting && document.settings.closeToTray && tray) {
       event.preventDefault();
@@ -1453,6 +1625,27 @@ if (locked)
       launch: (schedule, token, signal) =>
         scheduledRunner.launch(schedule, token, signal, scheduleConfiguration),
       changed: publish,
+    });
+    refresh = new RefreshService({
+      now: () => Date.now(),
+      monotonic: () => performance.now(),
+      heartbeat: syncHardwareVisibility,
+      version: (_document, deckId) => surfaceVersion(deckId),
+      setTimer: (callback, delay) => setTimeout(callback, delay),
+      clearTimer: (timer) =>
+        clearTimeout(timer as ReturnType<typeof setTimeout>),
+      launch: (origin, _definition, stamp, token, signal) =>
+        refreshRunner.launch(
+          origin,
+          stamp,
+          token,
+          signal,
+          scheduleConfiguration,
+        ),
+      changed: () => {
+        configureDevice();
+        publish();
+      },
     });
     toggleStorage = new ToggleStorage(app.getPath("userData"));
     await toggleStorage.load();
@@ -1530,6 +1723,8 @@ if (locked)
     startWorker("web");
     powerMonitor.on("suspend", () => {
       suspended = true;
+      surfaceViews.clear();
+      refresh?.pause(true);
       scheduler?.pause();
       triggers.disconnect();
     });
@@ -1548,6 +1743,8 @@ app.on("before-quit", (event) => {
   if (quitting) return;
   event.preventDefault();
   quitting = true;
+  refresh?.stop();
+  refreshRunner.stop();
   scheduler?.stop();
   scheduledRunner.stop();
   obsTests.close();

@@ -6,6 +6,7 @@ import {
   v3DocumentSchema,
   v4DocumentSchema,
   v5DocumentSchema,
+  v6DocumentSchema,
   legacyDocumentSchema,
   type AppDocument,
   type DeckConfig,
@@ -55,6 +56,10 @@ export function cloneProfiles(profiles: AppDocument["profiles"]) {
       for (const key of Object.values(page.keys)) {
         key.id = ids.get(key.id)!;
         key.generation = 0;
+        if (key.refresh) {
+          key.refresh.id = uid();
+          key.refresh.enabled = false;
+        }
         for (const target of bindingTargets(key).map((entry) => entry.target))
           if (target && target.kind !== "workflow")
             for (const action of target.kind === "action"
@@ -74,9 +79,16 @@ export function cloneProfiles(profiles: AppDocument["profiles"]) {
 }
 export function migrateDocument(value: unknown): AppDocument {
   const version = (value as { schemaVersion?: number })?.schemaVersion;
-  if (version === 6) return documentSchema.parse(value);
-  if (version === 5)
+  if (version !== undefined && version > 7)
+    throw new Error(`Unsupported schema version ${version}`);
+  if (version === 7) return documentSchema.parse(value);
+  if (version === 6)
     return documentSchema.parse({
+      ...v6DocumentSchema.parse(value),
+      schemaVersion: 7,
+    });
+  if (version === 5)
+    return migrateDocument({
       ...v5DocumentSchema.parse(value),
       schemaVersion: 6,
       schedules: [],

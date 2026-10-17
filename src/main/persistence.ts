@@ -1,3 +1,4 @@
+import { refreshError } from "../shared/refresh";
 import { CURRENT_SCHEMA_VERSION } from "../shared/schedules";
 import { targetWorkflow } from "../runtime/targets";
 import { authoredAssetReferences } from "../shared/asset-references";
@@ -41,6 +42,7 @@ export function validateDocument(value: unknown): AppDocument {
       unique(page.id);
       for (const binding of Object.values(page.keys)) {
         unique(binding.id);
+        if (binding.refresh) unique(binding.refresh.id);
         const source = binding.toggle?.source;
         if (source?.kind === "observed" && source.observation.kind === "obs") {
           const observedConnectionId = source.observation.connectionId;
@@ -109,16 +111,30 @@ export function validateDocument(value: unknown): AppDocument {
       .filter((b) => b.toggle).length > 4096
   )
     throw new Error("Maximum toggle bindings reached (4096)");
+  for (const profile of doc.profiles)
+    for (const page of profile.pages)
+      for (const b of Object.values(page.keys)) {
+        if (b.refresh?.enabled) {
+          const error = refreshError(b.refresh, doc);
+          if (error) throw new Error(error);
+        }
+      }
   return doc;
 }
 export function validateImport(value: unknown): AppDocument {
-  const doc = validateDocument(migrateDocument(value));
+  const imported = migrateDocument(value);
+  for (const p of imported.profiles)
+    for (const page of p.pages)
+      for (const b of Object.values(page.keys))
+        if (b.refresh) b.refresh.enabled = false;
+  const doc = validateDocument(imported);
   for (const profile of doc.profiles)
     for (const page of profile.pages)
       for (const binding of Object.values(page.keys))
         for (const { phase, target } of bindingTargets(binding)) {
           if (!target) continue;
           if (target.kind === "workflow") {
+            if (phase === "refresh") continue;
             if (
               !findWorkflow(
                 doc.workflows,
@@ -181,7 +197,11 @@ export function validateImport(value: unknown): AppDocument {
   for (const profile of doc.profiles)
     for (const page of profile.pages)
       for (const binding of Object.values(page.keys))
-        if (binding.toggle) {
+        if (binding.toggle || binding.refresh) {
+          if (binding.refresh) {
+            binding.refresh.id = randomUUID();
+            binding.refresh.enabled = false;
+          }
           binding.id = randomUUID();
           binding.generation = 0;
         }

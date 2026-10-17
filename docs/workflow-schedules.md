@@ -1,5 +1,9 @@
 # Explicit workflow schedules (PR20, schema v6)
 
+Current workspace schema is **v7**. [Visible button refresh](visible-button-refresh.md)
+documents the implemented PR23 visibility, activation and lifecycle extension.
+The original feature-specific schema/version notes below describe its baseline.
+
 Open **Flows**, select a workflow and clear the node selection to find **Schedules**
 next to its properties. Add an interval or cron schedule, provide its declared
 inputs as ordinary JSON, preview and save. **Enable schedule** is a separate,

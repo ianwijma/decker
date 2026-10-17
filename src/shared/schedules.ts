@@ -4,7 +4,7 @@ import { CronExpressionParser } from "cron-parser";
 import { DateTime, IANAZone } from "luxon";
 import type { AppDocument, Json } from "./schema";
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 export const MAX_SCHEDULES = 200;
 export const timezoneSchema = z
   .string()

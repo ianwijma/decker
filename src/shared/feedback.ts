@@ -93,6 +93,7 @@ export function selectBindingRun(
 ) {
   const matching = runs.filter(
     (r) =>
+      r.context?.source.kind !== "refresh" &&
       r.deckId === deckId &&
       r.bindingId === binding.id &&
       r.generation === binding.generation,
@@ -103,6 +104,7 @@ export function selectBindingRun(
 export type ButtonAppearance = KeyBinding["appearance"] & {
   stateLabel?: string;
   imageStatus?: "stale";
+  refreshStatus?: string;
 };
 /** The same composition feeds desktop keys, web views and device frames. */
 export function buttonAppearance(
@@ -137,6 +139,10 @@ export function buttonAppearance(
         ? "stale"
         : undefined,
   };
+  const refresh = observed.buttonRefresh as Record<string, string> | undefined;
+  appearance.refreshStatus = binding.refresh
+    ? `Refresh ${refresh?.[activityKey(deckId, binding)] ?? (binding.refresh.enabled ? "waiting" : "idle")}`
+    : undefined;
   const feedback = observed.buttonFeedback as
     Record<string, Record<string, Json>> | undefined;
   const state = feedback?.[activityKey(deckId, binding)];

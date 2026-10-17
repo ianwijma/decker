@@ -7,6 +7,7 @@ import type { DeviceStatus, DeviceState } from "../shared/schema";
 
 export type Frame = {
   deckId: string;
+  viewVersion?: string;
   hardwareId: string;
   brightness: number;
   page: Record<string, ButtonAppearance>;
@@ -254,6 +255,7 @@ export class DeviceSessions {
     delete session.status.errorDetails;
   }
   private release(session: Session) {
+    delete session.status.appliedView;
     session.generation++;
     clearTimeout(session.retry);
     session.retry = undefined;
@@ -423,6 +425,8 @@ export class DeviceSessions {
             break;
           }
           if (!written) {
+            if (session.frame !== frame) continue;
+            session.status.appliedView = frame.viewVersion;
             session.failures = 0;
             this.transition(session, "ready");
             return;

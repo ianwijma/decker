@@ -1,3 +1,4 @@
+import { RefreshEditor } from "./RefreshEditor";
 import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import {
   Copy,
@@ -32,10 +33,38 @@ export function Deck() {
     [copied, setCopied] = useState<KeyBinding>(),
     [event, setEvent] = useState<"press" | "release" | "longPress">("press"),
     [options, setOptions] = useState(false),
-    [connect, setConnect] = useState(false);
+    [connect, setConnect] = useState(false),
+    [refreshEditor, setRefreshEditor] = useState<{
+      key: string;
+      serial: number;
+    }>();
   const deck = doc.decks.find((d) => d.id === doc.activeDeckId)!;
   const profile = doc.profiles.find((p) => p.id === deck.activeProfileId)!,
     page = profile.pages.find((p) => p.id === deck.activePageId)!;
+  const committedView = snapshot!.viewVersions?.[deck.id];
+  useEffect(() => {
+    if (deck.kind !== "simulator" || !committedView) return;
+    const report = () =>
+      void window.decker.request({
+        type: "simulatorVisible",
+        deckId: deck.id,
+        version: committedView,
+        visible: !document.hidden,
+      });
+    report();
+    const timer = setInterval(report, 4000);
+    document.addEventListener("visibilitychange", report);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", report);
+      void window.decker.request({
+        type: "simulatorVisible",
+        deckId: deck.id,
+        version: committedView,
+        visible: false,
+      });
+    };
+  }, [deck.id, deck.kind, committedView]);
   const slot = keySlot(selected, deck.columns),
     key = page.keys[slot];
   const imageEpoch = useRef(0);
@@ -68,12 +97,29 @@ export function Deck() {
     keys((all) => {
       if (all[slot] && all[slot].id === key?.id) fn(all[slot]);
     });
-  const assign = (type: string, index = selected) =>
+  const assign = (type: string, index = selected) => {
+    if (type === "preset.dynamic-workflow") {
+      const targetSlot = keySlot(index, deck.columns);
+      const target =
+        page.keys[targetSlot] ?? binding("desktop.notify", "Dynamic workflow");
+      if (!page.keys[targetSlot]) {
+        delete target.press;
+        keys((all) => {
+          all[targetSlot] = target;
+        });
+      }
+      setRefreshEditor((previous) => ({
+        key: `${deck.id}:${page.id}:${target.id}`,
+        serial: (previous?.serial ?? 0) + 1,
+      }));
+      return;
+    }
     keys((all) => {
       all[keySlot(index, deck.columns)] = binding(type, actionById(type)?.name);
       all[keySlot(index, deck.columns)].appearance.icon =
         actionById(type)?.icon ?? "";
     });
+  };
   const addPage = (folder: boolean) =>
     edit((d) => {
       const p = d.profiles.find((p) => p.id === profile.id)!,
@@ -282,7 +328,10 @@ export function Deck() {
                   onDrop={(e) => {
                     e.preventDefault();
                     const type = e.dataTransfer.getData("decker/action");
-                    if (actionById(type)) {
+                    if (
+                      actionById(type) ||
+                      type === "preset.dynamic-workflow"
+                    ) {
                       setSelected(index);
                       assign(type, index);
                     }
@@ -306,6 +355,11 @@ export function Deck() {
                     />
                   )}
                   <span className="key-label">{b?.appearance.label ?? ""}</span>
+                  {b?.appearance.refreshStatus && (
+                    <small className="refresh-status" role="status">
+                      {b.appearance.refreshStatus}
+                    </small>
+                  )}
                   {b?.appearance.imageStatus === "stale" && (
                     <small
                       className="image-status"
@@ -484,6 +538,9 @@ export function Deck() {
                     ...structuredClone(copied!),
                     id: uid(),
                     generation: 0,
+                    refresh: copied!.refresh
+                      ? { ...copied!.refresh, id: uid(), enabled: false }
+                      : undefined,
                   };
                 })
               }
@@ -580,6 +637,17 @@ export function Deck() {
                 Remove image
               </button>
             )}
+            <RefreshEditor
+              key={`${deck.id}:${page.id}:${key.id}:${key.generation}:${key.refresh?.id ?? "none"}`}
+              binding={key}
+              deckId={deck.id}
+              openRequested={
+                refreshEditor?.key === `${deck.id}:${page.id}:${key.id}`
+                  ? refreshEditor.serial
+                  : 0
+              }
+              onSave={update}
+            />
             <ToggleEditor
               key={`${deck.id}:${page.id}:${slot}:${key.id}:${key.generation}`}
               binding={key}
@@ -738,6 +806,9 @@ export function Deck() {
                       ...structuredClone(key),
                       id: uid(),
                       generation: 0,
+                      refresh: key.refresh
+                        ? { ...key.refresh, id: uid(), enabled: false }
+                        : undefined,
                     };
                     setSelected(empty);
                   });
