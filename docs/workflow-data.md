@@ -1,8 +1,9 @@
 # Workflow JSON data and templates (PR15)
 
-Document schema stays v3. Use existing action nodes, Set/map nodes to name values,
-and the existing JSON field editors. Rich output pickers and template authoring
-are PR16 work.
+Current workspace schema is **v7**. This data grammar shipped on v3 and remains
+compatible. Use action nodes and Set/map nodes to name values. Rich output pickers
+and template controls are implemented in the [binding UI](data-binding-ui.md).
+Try the [working local data example](data-example.md).
 
 ## Expressions
 
@@ -150,14 +151,13 @@ Connect four action nodes with `next` edges. For a response such as
 The node IDs in this example are `http`, `parse`, `extract` and `notify`.
 The notification body is `Subscribers: 0.`. Use Set/map for reusable names, e.g.
 `{"subscribers":{"$ref":"outputs.extract.value"}}`, then reference
-`vars.subscribers`. This contract is available to PR16/PR17 without new node kinds
-or document migration.
+`vars.subscribers`. The binding UI and text-file actions use this contract without new node kinds.
 
 The regressions use local HTTP fixtures, mocked notifications and a virtual
 Electron display. Physical Stream Deck and real desktop notification acceptance
 remain pending for the coordinator's consolidated host session.
 
-PR21 adds the read-only `context` namespace and workflow-only **Update triggering
-button** action without changing the expression grammar or workspace schema.
+Trigger context provides the read-only `context` namespace and workflow-only **Update triggering
+button** action without changing the expression grammar. The original display contract shipped on v5.
 See [Trigger context and dynamic display](trigger-context-display.md) for origin,
 invocation/authority, clearing, cache and later scheduling/refresh contracts.

@@ -11,7 +11,7 @@ contains `asset` (a lowercase local SHA-256 hash), `width:256`, `height:256`,
 `sourceFormat` (`png`, `jpeg` or `webp`). No buffers, paths or URL strings enter
 the result. Bind **Update triggering button → Local image** to
 `outputs.image.asset`. Fetching works in manual/unbound runs; updating still
-requires PR21's saved-key authority. Workspace schema stays v5.
+requires PR21's saved-key authority. Remote images originally shipped on v5; current workspace schema is v7.
 
 ## Bounds and normalization
 

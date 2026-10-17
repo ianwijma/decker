@@ -1,6 +1,6 @@
 # Relative brightness and palette contexts (PR12 / PR21 contract)
 
-Schema remains v3. `deck.brightnessIncrease` and `deck.brightnessDecrease` take
+Current workspace schema is **v7**; relative brightness originally shipped on v3. `deck.brightnessIncrease` and `deck.brightnessDecrease` take
 `{step: number}`: a finite positive integer from 1 to 100, default **10**.
 Both return the resulting integer brightness (0–100) and are non-idempotent.
 Workflow retries require the existing explicit `retrySafe` confirmation; there
@@ -24,7 +24,8 @@ epoch guards, cancellation and navigation preservation remain unchanged.
 `paletteContexts` defaults to both contexts; `paletteVisible:false` overrides
 all contexts. The full `catalog` and `actionById` remain the validation,
 execution and import contracts. `paletteCatalog` is a compatibility export for
-button context. PR21 should use workflow context for appearance authoring.
+button context. Trigger-context appearance authoring uses workflow context; see
+[dynamic display](trigger-context-display.md).
 
 Button libraries, single actions, sequences and every key phase show relative
 brightness. Absolute `deck.brightness` and `deck.appearance` are workflow-only

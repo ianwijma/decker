@@ -1,6 +1,7 @@
 # Data binding UI and node audit (PR16)
 
-Schema remains v3. Names are presentation only: pickers emit segment-array
+Current workspace schema is **v7**; the binding UI originally shipped on v3.
+Try the [working local data example](data-example.md). Names are presentation only: pickers emit segment-array
 references containing the existing node IDs, so renaming never rewrites data
 identity. Duplicate names receive local choice ordinals; advanced JSON and node
 identity remain accessible.

@@ -1,11 +1,12 @@
 # Toggle runtime and editor (schema v5)
 
-PR19 introduced the v5 format described here. [Workflow schedules](workflow-schedules.md)
-advance the current workspace to v6 without changing toggle or display-cache formats.
+Current workspace schema is **v7**. PR19 introduced the v5 format described here;
+[workflow schedules](workflow-schedules.md) added v6 and
+[visible refresh](visible-button-refresh.md) added v7 without changing the toggle format.
 
 PR18 introduced the v4 runtime. PR19 adds the editor, observed sources and shared
-appearance contract described below. Scheduling, dynamic images and physical
-hardware acceptance remain separate work.
+appearance contract described below. Scheduling and dynamic images are implemented in their linked guides; physical
+hardware acceptance remains pending.
 Ordinary Run workflow bindings retain activity-only behavior and observed media
 feedback is unchanged.
 
@@ -57,7 +58,7 @@ owner+epoch mutation and import/export rekeying apply without exposing values.
 
 The explicit v3 decoder uses pre-toggle bindings. Migration is ordered
 v1→v2→workflow UUID v3→v4, or v2→v3→v4, or v3→v4. Existing documents gain no
-toggles and keep their assignments. V4 documents migrate to the current v5 schema on load;
+toggles and keep their assignments. V4 documents migrate through v5 to current v7 on load;
 unsupported future versions are backed up and block writes rather than being
 parsed through a stripping decoder. Exports contain configuration/assets and
 credential placeholders, **no runtime state**. Import allocates fresh toggle
@@ -200,7 +201,7 @@ pending for the coordinator's consolidated hardware session.
 
 ## PR19 editor and schema v5
 
-The current workspace schema is **v5**. Explicit v1/v2/v3/v4 decoders migrate in
+PR19 introduced schema **v5** (current workspace schema is **v7**). Explicit v1/v2/v3/v4 decoders migrate in
 order without synthesizing toggles or running probes. Appearance-only migration
 retains v4 toggle identities and durable stamps. Unsupported future documents
 are preserved in backups and block writes until repaired and restarted.
@@ -292,9 +293,9 @@ Desktop keys, web deck views, and generated device frames, in this order:
 3. Bounded dynamic/legacy display overrides (`buttonFeedback` label/background).
 4. Temporary running/success/failure activity.
 
-PR21 can extend stage 3 without changing confirmed toggle state or preview
-semantics. No dynamic action/cache/remote image fetch or periodic refresh is
-introduced here. Cancellation/expiry resolves the latest underlying appearance.
+The implemented [dynamic display](trigger-context-display.md),
+[remote images](remote-image-assets.md) and [visible refresh](visible-button-refresh.md)
+extend stage 3 without changing confirmed toggle state or preview semantics. Cancellation/expiry resolves the latest underlying appearance.
 A separate bounded `stateLabel` marker makes on/off/unknown, busy, stale, blocked
 and failed states visible even with uploaded artwork. Ordinary desktop selection retains `aria-pressed`; toggle editor selection uses
 `aria-current` to keep it distinct from confirmed on/off state. State descriptions
