@@ -1,6 +1,7 @@
 # Session diagnostics
 
-`src/shared/health.ts` is the shared health/remediation contract for Diagnostics and future health views. `Snapshot.health` contains transient `HealthRecord` values; older snapshot fixtures can call `buildHealth(snapshot)`. No workspace schema migration is required. The compatibility `Capability.available` field and PR01's ready-only `DeviceStatus.connected` remain available.
+`src/shared/health.ts` is the shared health/remediation contract for **Home** and **Settings → Diagnostics**. See the [current user guide](USER-GUIDE.md)
+for Repair guidance, copy/open and Retry navigation. `Snapshot.health` contains transient `HealthRecord` values; older snapshot fixtures can call `buildHealth(snapshot)`. No workspace schema migration is required. The compatibility `Capability.available` field and PR01's ready-only `DeviceStatus.connected` remain available.
 
 | State        | Meaning                                                                                                               |
 | ------------ | --------------------------------------------------------------------------------------------------------------------- |

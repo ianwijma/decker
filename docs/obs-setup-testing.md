@@ -45,7 +45,8 @@ before committing the connection document. Storage failure preserves the previou
 owner. A document failure can retain an unreferenced secret, following the merged
 conservative retention contract. Keep/remove choices affect only the selected
 owner; copies, revision pins and immutable runs keep their existing references.
-Schema v3, existing connection IDs/refs and dynamic field bindings are unchanged.
+This feature originally shipped on v3; current workspace schema is **v7**.
+Existing connection IDs/refs and dynamic field bindings retain their contracts.
 New action fields use searchable display names, duplicate-name disambiguation and
 missing-choice feedback while storing stable IDs.
 

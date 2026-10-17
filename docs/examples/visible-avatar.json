@@ -126,7 +126,8 @@
               "config": {
                 "url": {
                   "$ref": "outputs.parse.value.avatar"
-                }
+                },
+                "credentialRef": ""
               }
             },
             "timeoutMs": 30000,
