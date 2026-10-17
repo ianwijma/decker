@@ -425,6 +425,24 @@ test("five-minute choice, draft validation, inactive copies and current saved en
     (await page.evaluate(() => window.decker.snapshot())).document.profiles[0]
       .pages[0].keys[2].refresh!.enabled,
   ).toBe(false);
+  const reconstructed = await page.evaluate(async () => {
+    const d = (await window.decker.snapshot()).document,
+      b = structuredClone(d.profiles[0].pages[0].keys[2]);
+    delete d.profiles[0].pages[0].keys[2];
+    await window.decker.request({ type: "save", document: d });
+    d.profiles[0].pages[0].keys[2] = b;
+    const saved = (await window.decker.request({
+      type: "save",
+      document: d,
+    })) as Awaited<ReturnType<typeof window.decker.snapshot>>;
+    return {
+      old: b.id,
+      current: saved.document.profiles[0].pages[0].keys[2].id,
+      enabled: saved.document.profiles[0].pages[0].keys[2].refresh!.enabled,
+    };
+  });
+  expect(reconstructed.current).not.toBe(reconstructed.old);
+  expect(reconstructed.enabled).toBe(false);
 });
 test("hidden/minimized simulator, route and navigation cancel hanging work and reject late display writes", async () => {
   const ids = await fixture(60, false, "/slow");

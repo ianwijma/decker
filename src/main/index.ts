@@ -1147,9 +1147,9 @@ async function handleRequest(request: Request) {
               .flatMap((p) => p.pages)
               .flatMap((p) => Object.values(p.keys))
               .find((k) => k.id === b.id);
-            if (!old && b.toggle) {
+            if (!old && (b.toggle || b.refresh)) {
               // New renderer-supplied bindings cannot resurrect a deleted
-              // binding's durable state by reusing its old id/generation.
+              // binding's durable or cached state by reusing its old id/generation.
               b.id = uid();
               b.generation = 0;
             }
