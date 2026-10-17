@@ -554,6 +554,32 @@ test("hidden/minimized simulator, route and navigation cancel hanging work and r
   expect(
     (await page.evaluate(() => window.decker.snapshot())).refresh?.[0].nextAt,
   ).toBeUndefined();
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window.isMinimized = () => false;
+    window.webContents.emit(
+      "render-process-gone",
+      {},
+      { reason: "crashed", exitCode: 1 },
+    );
+  });
+  await page.evaluate(
+    async (s) => {
+      await window.decker.request({
+        type: "simulatorVisible",
+        deckId: s.deckId,
+        version: s.version,
+        visible: true,
+      });
+    },
+    {
+      deckId: s.document.activeDeckId,
+      version: s.viewVersions![s.document.activeDeckId],
+    },
+  );
+  expect(
+    (await page.evaluate(() => window.decker.snapshot())).refresh?.[0].nextAt,
+  ).toBeUndefined();
 });
 test("paired foreground current-view clients deduplicate refresh; desktop web preview never owns visibility", async () => {
   const ids = await fixture(60, true);

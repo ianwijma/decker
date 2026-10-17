@@ -149,6 +149,7 @@ let scheduler: Scheduler | undefined;
 let scheduleWatermarks: ScheduleWatermarks;
 let scheduleConfiguration = "";
 let suspended = false;
+let simulatorRendererReady = false;
 const scheduledRunner = new ScheduledRunner(
   (message) => post("runner", message),
   (schedule) => {
@@ -1074,6 +1075,7 @@ async function handleRequest(request: Request) {
       if (
         !suspended &&
         !quitting &&
+        simulatorRendererReady &&
         window?.isVisible() &&
         !window.isMinimized() &&
         deck?.kind === "simulator" &&
@@ -1526,6 +1528,7 @@ async function handleRequest(request: Request) {
   }
 }
 function createWindow() {
+  simulatorRendererReady = false;
   window = new BrowserWindow({
     width: 1480,
     height: 960,
@@ -1543,11 +1546,21 @@ function createWindow() {
   });
   window.on("hide", () => refresh?.drop("simulator"));
   window.on("minimize", () => refresh?.drop("simulator"));
-  window.webContents.on("render-process-gone", () =>
-    refresh?.drop("simulator"),
-  );
-  window.webContents.on("did-start-navigation", () =>
-    refresh?.drop("simulator"),
+  window.webContents.on("did-finish-load", () => {
+    simulatorRendererReady = true;
+  });
+  window.webContents.on("render-process-gone", () => {
+    simulatorRendererReady = false;
+    refresh?.drop("simulator");
+  });
+  window.webContents.on(
+    "did-start-navigation",
+    (_event, _url, _inPlace, mainFrame) => {
+      if (mainFrame) {
+        simulatorRendererReady = false;
+        refresh?.drop("simulator");
+      }
+    },
   );
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
@@ -1710,6 +1723,7 @@ if (locked)
     startWorker("web");
     powerMonitor.on("suspend", () => {
       suspended = true;
+      surfaceViews.clear();
       refresh?.pause(true);
       scheduler?.pause();
       triggers.disconnect();
